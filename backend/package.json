@@ -1,0 +1,46 @@
+{
+  "name": "novacore-portal-rrhh-backend",
+  "version": "1.0.0",
+  "description": "Backend API y capa RAG Multiagente para el Portal Interno de Consulta de Políticas de RRHH de NovaCore Technologies Costa Rica S.A.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "db:migrate": "npx sequelize-cli db:migrate",
+    "db:migrate:undo": "npx sequelize-cli db:migrate:undo:all",
+    "db:seed": "npx sequelize-cli db:seed:all",
+    "db:seed:undo": "npx sequelize-cli db:seed:undo:all"
+  },
+  "keywords": [
+    "rrhh",
+    "rag",
+    "multiagente",
+    "express",
+    "sequelize",
+    "mysql",
+    "chromadb"
+  ],
+  "author": "NovaCore Technologies Costa Rica S.A.",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@xenova/transformers": "^2.17.2",
+    "bcryptjs": "^2.4.3",
+    "chromadb": "^3.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "googleapis": "^144.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.12.0",
+    "node-cron": "^3.0.3",
+    "openai": "^7.57.0",
+    "pdf-parse": "^1.1.1",
+    "sequelize": "^6.37.5",
+    "sequelize-cli": "^6.6.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
