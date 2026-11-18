@@ -29,7 +29,7 @@ El sistema opera con dos flujos desacoplados (ver [diagrama_arquitectura.md](doc
    - **Agente Validador (`validadorAgent.js`):** Audita cada respuesta antes de entregarla mediante Capa 1 determinista ORM (prevención de fugas de terceros) y Capa 2 LLM rápida de fidelidad (`validado: true`).
    - **Agente de Escalamiento (`escalamientoAgent.js`):** Crea tickets formales con folio correlativo (`TKT-2026-XXX`) en `tickets_rrhh` cuando no existe política vigente o el colaborador solicita atención humana.
 2. **Flujos Programados (`node-cron`):**
-   - **Agente de Ingesta (`06:30 a.m.` · `ingestaAgent.js`):** Sincronización incremental vía `drive.changes` y verificación de carpeta (`Docs`, `Sheets`, `PDF`).
+   - **Agente de Ingesta (`cada hora` · `ingestaAgent.js`):** Sincronización incremental vía `drive.changes` y verificación de carpeta (`Docs`, `Sheets`, `PDF`).
    - **Agente Analista (`07:00 a.m.` · `analistaAgent.js`):** Calcula 8 KPIs deterministas vía Sequelize ORM (clasificando el Top 5 de temas desde `palabras_clave`), redacta un resumen ejecutivo con DeepSeek y persiste en `reportes_diarios`.
 
 ---
@@ -48,7 +48,7 @@ El sistema opera con dos flujos desacoplados (ver [diagrama_arquitectura.md](doc
 │   │   ├── agents/                        # 7 agentes (ingesta, politicas, datos, orquestador, validador, escalamiento, analista)
 │   │   ├── config/                        # database.js y llmClient.js (DeepSeek)
 │   │   ├── controllers/                   # authController, chatController, dashboardController, ingestController, ticketController
-│   │   ├── jobs/                          # driveSyncJob.js (06:30) y dailyReportJob.js (07:00)
+│   │   ├── jobs/                          # driveSyncJob.js (cada hora) y dailyReportJob.js (07:00)
 │   │   ├── middlewares/                   # authMiddleware.js (JWT) y roleMiddleware.js (RBAC)
 │   │   ├── migrations/                    # 9 migraciones SQL (incluye palabras_clave y tickets_rrhh)
 │   │   ├── models/                        # 9 modelos Sequelize con asociaciones

@@ -11,7 +11,7 @@
 
 ## 1. Visión General de Flujos Independientes
 
-La arquitectura del portal separa estrictamente la **ruta interactiva en tiempo real** (consultas conversacionales con voz, validación de fidelidad/privacidad y creación de tickets) de los **flujos batch programados** (`06:30 a.m.` sincronización con Google Drive y `07:00 a.m.` generación del reporte analítico diario). Toda la persistencia relacional —incluyendo las **9 tablas** en MySQL y la gestión dinámica de `palabras_clave` y `tickets_rrhh`— opera exclusivamente mediante **Sequelize ORM (cero SQL crudo)**.
+La arquitectura del portal separa estrictamente la **ruta interactiva en tiempo real** (consultas conversacionales con voz, validación de fidelidad/privacidad y creación de tickets) de los **flujos batch programados** (sincronización con Google Drive cada hora y `07:00 a.m.` generación del reporte analítico diario). Toda la persistencia relacional —incluyendo las **9 tablas** en MySQL y la gestión dinámica de `palabras_clave` y `tickets_rrhh`— opera exclusivamente mediante **Sequelize ORM (cero SQL crudo)**.
 
 ---
 
@@ -51,13 +51,13 @@ flowchart TD
 
 ---
 
-## 3. Flujo 2: Ingesta Incremental (`06:30 a.m.`) y Reporte Analítico Diario (`07:00 a.m.`)
+## 3. Flujo 2: Ingesta Incremental (`cada hora`) y Reporte Analítico Diario (`07:00 a.m.`)
 
 ```mermaid
 flowchart LR
-    subgraph INGESTA["Flujo Batch A · Agente de Ingesta (06:30 a.m. / Manual RRHH)"]
+    subgraph INGESTA["Flujo Batch A · Agente de Ingesta (cada hora / Manual RRHH)"]
         direction TB
-        CRON1["Cron Job 06:30 a.m.<br/>(driveSyncJob.js)"] --> ING["6. Agente de Ingesta<br/>(ingestaAgent.js)"]
+        CRON1["Cron Job cada hora<br/>(driveSyncJob.js)"] --> ING["6. Agente de Ingesta<br/>(ingestaAgent.js)"]
         MAN1["POST /api/ingest/sync<br/>(Solo rol rrhh)"] --> ING
         ING -->|"Drive API v3 (drive.readonly)<br/>changes.list + files.list"| GDRIVE[("Google Drive Folder<br/>Docs · Sheets · PDF")]
         GDRIVE -->|"Export text/plain, text/csv<br/>y pdf-parse"| PARSE["Parser + Chunker<br/>600-800 tokens + metadatos"]

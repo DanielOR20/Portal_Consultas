@@ -16,7 +16,7 @@ async function startServer() {
     console.log('Conexión con MySQL verificada correctamente.');
 
     startDriveSyncJob();
-    console.log('Cron diario de sincronización con Google Drive programado (06:30 a.m.).');
+    console.log('Cron de sincronización con Google Drive programado (cada hora).');
 
     startDailyReportJob();
     console.log('Cron diario de reporte analítico RRHH programado (07:00 a.m.).');

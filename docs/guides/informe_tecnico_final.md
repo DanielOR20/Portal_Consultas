@@ -23,7 +23,7 @@ La arquitectura divide el sistema en dos planos independientes (detallados en [d
 
 - **Plano Síncrono (Tiempo Real):** Aplicación SPA en React + Vite (tema **Vino Fosforescente y Blanco Puro**, con dictado y lectura por voz mediante Web Speech API) comunicada vía REST/JWT con Express. El **Agente Orquestador** clasifica cada consulta apoyado en la tabla dinámica `palabras_clave`, la enruta hacia el **Agente de Políticas RAG**, el **Agente de Datos del Colaborador** o ambos en paralelo (`Promise.all`), y somete la salida al **Agente Validador** (privacidad ORM + fidelidad LLM) antes de devolverla y registrarla en `consultas_chat`. Cuando no existe respaldo documental, el **Agente de Escalamiento** permite crear tickets reales en `tickets_rrhh`.
 - **Plano Asíncrono / Programado (`node-cron`):**
-  - **06:30 a.m. (`driveSyncJob.js`):** El **Agente de Ingesta** consulta Google Drive API v3 (`drive.changes` y listado de carpeta) para detectar altas, modificaciones y eliminaciones de documentos en Docs, Sheets y PDF, regenerando *chunks* y *embeddings* únicamente cuando existen cambios.
+  - **Cada hora (`driveSyncJob.js`):** El **Agente de Ingesta** consulta Google Drive API v3 (`drive.changes` y listado de carpeta) para detectar altas, modificaciones y eliminaciones de documentos en Docs, Sheets y PDF, regenerando *chunks* y *embeddings* únicamente cuando existen cambios.
   - **07:00 a.m. (`dailyReportJob.js`):** El **Agente Analista** calcula determinísticamente en SQL/Sequelize los 8 KPIs diarios, solicita a DeepSeek un resumen ejecutivo de 3 a 5 frases basado exclusivamente en el JSON calculado y guarda el reporte en `reportes_diarios`.
 
 ---
