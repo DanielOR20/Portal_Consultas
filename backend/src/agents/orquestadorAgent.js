@@ -4,6 +4,7 @@ const { ConsultaChat, PalabraClave } = require('../models');
 const { chatCompletion } = require('../config/llmClient');
 const { runPoliticasAgent } = require('./politicasAgent');
 const { runDatosAgent } = require('./datosAgent');
+const { validateResponse } = require('./validadorAgent');
 const { safeParseJson } = require('../utils/jsonHelper');
 
 const VALID_INTENTS = [
@@ -22,6 +23,10 @@ const FUERA_ALCANCE_MESSAGE =
 
 const CACHE_TTL_MS = 60 * 1000;
 let keywordsCache = { grouped: null, loadedAt: 0 };
+
+function invalidateKeywordsCache() {
+  keywordsCache = { grouped: null, loadedAt: 0 };
+}
 
 function normalizeText(text) {
   return String(text || '')
@@ -179,6 +184,7 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
   let citas = [];
   let resuelta = true;
   let escalada = false;
+  let evidencia = '';
 
   if (intencion === 'restringida') {
     respuesta = RESTRINGIDA_MESSAGE;
@@ -196,10 +202,12 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
     citas = polResult.citas || [];
     resuelta = polResult.encontrada;
     escalada = polResult.escalada;
+    evidencia = polResult.evidencia || '';
     agente = 'AgentePoliticasRAG';
   } else if (intencion === 'dato_personal') {
     const datosResult = await runDatosAgent(pregunta, user, historial);
     respuesta = datosResult.respuesta;
+    evidencia = JSON.stringify(datosResult.contextoDatos || {});
     agente = 'AgenteDatosColaborador';
     resuelta = true;
     escalada = false;
@@ -213,6 +221,7 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
     resuelta = polResult.encontrada;
     escalada = polResult.escalada;
     agente = 'AgenteOrquestadorMixto';
+    evidencia = `${JSON.stringify(datosResult.contextoDatos || {})}\n\n${polResult.evidencia || ''}`;
 
     const synthesisPrompt = [
       `PREGUNTA ORIGINAL:\n${pregunta}`,
@@ -232,9 +241,27 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
         systemPrompt: MIXED_SYNTHESIS_PROMPT,
         userPrompt: synthesisPrompt,
         temperature: 0.1,
-        jsonMode: false
+        jsonMode: false,
+        maxTokens: 450
       })
     ).trim();
+  }
+
+  // Agente Validador (Capa 1 ORM determinista < 5ms + Capa 2 LLM rápida)
+  const validation = await validateResponse({
+    pregunta,
+    respuesta,
+    user,
+    evidencia,
+    escalada
+  });
+
+  if (validation.blockedByPrivacy) {
+    respuesta = validation.respuestaSanitizada;
+    citas = [];
+    escalada = false;
+    resuelta = true;
+    agente = 'ValidadorGuardrail';
   }
 
   const latencia_ms = Date.now() - startTime;
@@ -257,12 +284,15 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
     agente,
     citas,
     escalada,
+    validado: validation.valido,
+    validacion_observaciones: validation.observaciones,
     latencia_ms
   };
 }
 
 module.exports = {
   runOrquestadorAgent,
+  invalidateKeywordsCache,
   RESTRINGIDA_MESSAGE,
   FUERA_ALCANCE_MESSAGE
 };

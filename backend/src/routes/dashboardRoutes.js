@@ -11,6 +11,8 @@ router.get('/latest', authMiddleware, requireRole('rrhh'), dashboardController.g
 router.get('/history', authMiddleware, requireRole('rrhh'), dashboardController.getHistory);
 router.post('/generate', authMiddleware, requireRole('rrhh'), dashboardController.generateManual);
 router.get('/keywords', authMiddleware, requireRole('rrhh'), dashboardController.getKeywords);
+router.post('/keywords', authMiddleware, requireRole('rrhh'), dashboardController.createKeyword);
+router.patch('/keywords/:id', authMiddleware, requireRole('rrhh'), dashboardController.updateKeyword);
+router.delete('/keywords/:id', authMiddleware, requireRole('rrhh'), dashboardController.deleteKeyword);
 
 module.exports = router;
-

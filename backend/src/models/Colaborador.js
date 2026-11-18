@@ -91,6 +91,14 @@ module.exports = (sequelize, DataTypes) => {
       as: 'consultasChat',
       foreignKey: 'colaborador_id'
     });
+    Colaborador.hasMany(models.TicketRRHH, {
+      as: 'tickets',
+      foreignKey: 'colaborador_id'
+    });
+    Colaborador.hasMany(models.TicketRRHH, {
+      as: 'ticketsAtendidos',
+      foreignKey: 'atendido_por'
+    });
   };
 
   return Colaborador;

@@ -29,6 +29,10 @@ Devuelve exclusivamente un JSON válido con esta estructura:
 let policyTermsCache = { data: null, loadedAt: 0 };
 const CACHE_TTL_MS = 60 * 1000;
 
+function invalidatePolicyTermsCache() {
+  policyTermsCache = { data: null, loadedAt: 0 };
+}
+
 async function getDbPolicyTerms() {
   const now = Date.now();
   if (policyTermsCache.data && now - policyTermsCache.loadedAt < CACHE_TTL_MS) {
@@ -171,16 +175,26 @@ async function runPoliticasAgent(pregunta, historial = []) {
   }
 
   const citas = buildDeduplicatedCitations(hits, parsed.indices_usados);
+  const validIndexes = Array.isArray(parsed.indices_usados)
+    ? parsed.indices_usados.filter((i) => Number.isInteger(i) && i >= 0 && i < hits.length)
+    : [];
+  const usedHits = validIndexes.length > 0 ? validIndexes.map((i) => hits[i]) : hits.slice(0, 2);
+  const evidencia = usedHits
+    .map((h) => `[${h.metadata?.codigo_version}] ${h.text}`)
+    .join('\n---\n');
 
   return {
     encontrada: true,
     escalada: false,
     respuesta: parsed.respuesta.trim(),
-    citas
+    citas,
+    evidencia
   };
 }
 
 module.exports = {
   runPoliticasAgent,
+  resolveThemeBoostTerms,
+  invalidatePolicyTermsCache,
   NO_POLICY_MESSAGE
 };

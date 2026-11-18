@@ -5,7 +5,7 @@
 | **Proyecto** | Portal Interno de Consulta de Políticas de RRHH con RAG Multiagente (`Portal_Consultas`) |
 | **Organización Modelo** | NovaCore Technologies Costa Rica S.A. (250 colaboradores · Sector Software B2B) |
 | **Marco Normativo** | Legislación Laboral de la República de Costa Rica (Código de Trabajo Ley N.° 2 y leyes conexas) |
-| **Versión / Fecha** | `v1.0` · 17 de noviembre de 2026 |
+| **Versión / Fecha** | `v1.2` · 17 de noviembre de 2026 |
 | **Repositorio Oficial** | `https://github.com/DanielOR20/Portal_Consultas.git` |
 
 ---
@@ -21,7 +21,7 @@ El **Portal Interno de Consulta de Políticas de RRHH con RAG Multiagente** resu
 
 La arquitectura divide el sistema en dos planos independientes (detallados en [diagrama_arquitectura.md](../architecture/diagrama_arquitectura.md)):
 
-- **Plano Síncrono (Tiempo Real):** Aplicación SPA en React + Vite comunicada vía REST/JWT con Express. El **Agente Orquestador** clasifica cada consulta y la enruta hacia el **Agente de Políticas RAG** (búsqueda híbrida sobre `vectors.json`), el **Agente de Datos del Colaborador** (consultas Sequelize de solo lectura en MySQL), ambos en paralelo (`Promise.all` para consultas mixtas), o un **Guardrail** inmediato para rechazar fugas de privacidad (`restringida`) y temas ajenos (`fuera_alcance`).
+- **Plano Síncrono (Tiempo Real):** Aplicación SPA en React + Vite (tema **Vino y Blanco**, con dictado y lectura por voz mediante Web Speech API) comunicada vía REST/JWT con Express. El **Agente Orquestador** clasifica cada consulta apoyado en la tabla dinámica `palabras_clave`, la enruta hacia el **Agente de Políticas RAG**, el **Agente de Datos del Colaborador** o ambos en paralelo (`Promise.all`), y somete la salida al **Agente Validador** (privacidad ORM + fidelidad LLM) antes de devolverla y registrarla en `consultas_chat`. Cuando no existe respaldo documental, el **Agente de Escalamiento** permite crear tickets reales en `tickets_rrhh`.
 - **Plano Asíncrono / Programado (`node-cron`):**
   - **06:30 a.m. (`driveSyncJob.js`):** El **Agente de Ingesta** consulta Google Drive API v3 (`drive.changes` y listado de carpeta) para detectar altas, modificaciones y eliminaciones de documentos en Docs, Sheets y PDF, regenerando *chunks* y *embeddings* únicamente cuando existen cambios.
   - **07:00 a.m. (`dailyReportJob.js`):** El **Agente Analista** calcula determinísticamente en SQL/Sequelize los 8 KPIs diarios, solicita a DeepSeek un resumen ejecutivo de 3 a 5 frases basado exclusivamente en el JSON calculado y guarda el reporte en `reportes_diarios`.
@@ -33,24 +33,26 @@ La arquitectura divide el sistema en dos planos independientes (detallados en [d
 | Capa | Tecnología Elegida | Justificación Técnica y Operativa |
 | :--- | :--- | :--- |
 | **Backend API** | Node.js (CommonJS) + Express 4 | Ecosistema unificado en JavaScript entre frontend y backend, arranque ligero, compatibilidad directa con `sequelize-cli`, `pdf-parse` y `googleapis`, y manejo asíncrono eficiente para llamadas concurrentes en consultas mixtas. |
-| **Base de Datos Relacional** | MySQL 8.0 + Sequelize ORM (`mysql2`) | Integridad referencial estricta entre las **8 tablas** del portal (`colaboradores`, `saldos_vacaciones`, `solicitudes`, `incapacidades`, `movimientos_personal`, `consultas_chat`, `reportes_diarios` y `palabras_clave`), migraciones versionadas reproducibles, gestión dinámica de **81 palabras clave** en BD sin listas hardcodeadas en JS y consultas **100 % vía Sequelize ORM (cero SQL crudo)** en toda la aplicación. |
+| **Base de Datos Relacional** | MySQL 8.0 + Sequelize ORM (`mysql2`) | Integridad referencial estricta entre las **9 tablas** del portal (`colaboradores`, `saldos_vacaciones`, `solicitudes`, `incapacidades`, `movimientos_personal`, `consultas_chat`, `reportes_diarios`, `palabras_clave` y `tickets_rrhh`), migraciones versionadas reproducibles, CRUD en tiempo real de palabras clave con invalidación de caché, flujo completo de tickets y consultas **100 % vía Sequelize ORM (cero SQL crudo)** en toda la aplicación. |
 | **Seguridad y Validación** | `jsonwebtoken` + `bcryptjs` + `zod` | Autenticación *stateless* con expiración configurable (`8h`), hashing seguro de contraseñas con salt y validación estructural estricta de entradas en endpoints críticos (`/api/auth/login`, `/api/chat`). |
 | **Modelo de Lenguaje (LLM)** | DeepSeek API (`deepseek-chat`) vía SDK `openai` | Excelente relación costo/latencia y soporte nativo de `response_format: { type: 'json_object' }`, indispensable para clasificación determinista de intenciones (`T=0`) y respuestas estructuradas con verificación de cobertura documental (`T=0.1`). |
 | **Embeddings Multilingües** | `@xenova/transformers` (`Xenova/paraphrase-multilingual-MiniLM-L12-v2`) | DeepSeek no provee API de embeddings; este modelo ONNX local de 384 dimensiones optimizado para texto multilingüe (incluyendo español) opera sin dependencias externas en la nube, sin costo por token de indexación y con latencia ~30–50 ms por consulta tras su carga inicial. |
 | **Almacenamiento Vectorial** | Vector Store JSON persistente (`backend/vector_store/vectors.json`) | Para una base normativa corporativa de 10 documentos oficiales (~31 fragmentos vectorizados de 384 dimensiones), un almacén persistente en memoria + disco con búsqueda híbrida (coseno + refuerzo léxico) ofrece latencia sub-milisegundo sin requerir levantar un contenedor Docker adicional para ChromaDB en desarrollo local, manteniendo compatibilidad arquitectónica con una futura migración a base vectorial distribuida. |
-| **Frontend & Visualización** | React 18 + Vite 6 + Tailwind CSS v4 + Chart.js | Compilación rápida (`5.22s`), sistema de diseño corporativo luminoso en **Vino y Blanco** (`#722F37`, `#4E1A21`, `#FDF2F4`, `#FFFFFF`, `#FAF7F8`) con notificaciones Toast, barra de progreso vacacional, explorador de preguntas por categoría y gráficos interactivos (`Line`, `Bar`, `Doughnut`) mediante `react-chartjs-2`. |
+| **Frontend & Visualización** | React 18 + Vite 6 + Tailwind CSS v4 + Chart.js | Compilación rápida (`5.25s`), sistema de diseño corporativo luminoso en **Vino y Blanco** (`#722F37`, `#4E1A21`, `#FDF2F4`, `#FFFFFF`, `#FAF7F8`), interacción por voz (`SpeechRecognition` + `speechSynthesis`), notificaciones Toast, tickets en vivo en `/chat` y `/dashboard`, gestor visual CRUD de `palabras_clave`, exportación de reportes CSV/JSON y gráficos interactivos (`Line`, `Bar`, `Doughnut`). |
 
 ---
 
 ## 3. Diseño Multiagente, Control de Acceso por Roles (RBAC) y Prompts Versionados
 
-### 3.1 Los 5 Agentes Especializados
+### 3.1 Los 7 Agentes Especializados
 
 1. **`ingestaAgent.js` (Agente de Ingesta):** Mantiene sincronizado el índice vectorial con la carpeta oficial de Google Drive mediante `sync_state.json` y `drive.changes.getStartPageToken` / `changes.list`, asegurando eliminación de vectores huérfanos cuando un documento es borrado o movido.
-2. **`orquestadorAgent.js` (Agente Orquestador):** Clasifica la consulta en exactamente una de 5 intenciones (`politica`, `dato_personal`, `mixta`, `restringida`, `fuera_alcance`), aplica guardrails tempranos, ejecuta paralelismo con `Promise.all` en consultas mixtas y persiste trazabilidad completa en `consultas_chat` (`colaborador_id`, `pregunta`, `intencion`, `agente`, `documentos_citados`, `resuelta`, `escalada`, `latencia_ms`, `fecha`).
-3. **`politicasAgent.js` (Agente de Políticas RAG):** Ejecuta recuperación híbrida (`topK = 7`, `minScore = 0.38`) y obliga al LLM a responder en `jsonMode` indicando `"encontrada": true | false` y `"indices_usados"`. Si no hay evidencia documental suficiente o la consulta trata sobre beneficios inexistentes (ej. bono por mascotas, vehículos eléctricos o hipotecas directas), devuelve `escalada: true` sin inventar información.
-4. **`datosAgent.js` (Agente de Datos del Colaborador):** Consulta MySQL en modo solo lectura filtrando por `colaborador_id = req.user.id`. Ejecuta en JavaScript determinista el cálculo de próxima quincena hábil (día 15 o último día hábil) y próxima evaluación semestral (junio/diciembre o fin de periodo de prueba de 90 días).
-5. **`analistaAgent.js` (Agente Analista de Reportes):** Calcula los 8 indicadores diarios exclusivamente mediante consultas ORM agregadas y utiliza DeepSeek (`T=0.2`) únicamente para redactar la síntesis ejecutiva de 3 a 5 frases a partir de ese JSON cerrado.
+2. **`orquestadorAgent.js` (Agente Orquestador):** Consulta las palabras clave activas desde `palabras_clave` vía Sequelize ORM (caché 60 s con invalidación inmediata vía `invalidateKeywordsCache()`), clasifica la consulta en 5 intenciones (`politica`, `dato_personal`, `mixta`, `restringida`, `fuera_alcance`), aplica guardrails deterministas tempranos, ejecuta paralelismo con `Promise.all` en consultas mixtas y registra trazabilidad completa en `consultas_chat`.
+3. **`politicasAgent.js` (Agente de Políticas RAG):** Ejecuta recuperación híbrida (`topK = 7`, `minScore = 0.38`) con expansión temática dinámica desde `palabras_clave` (`invalidatePolicyTermsCache()`) y obliga al LLM a responder en `jsonMode` indicando `"encontrada": true | false` y `"indices_usados"`. Si no hay evidencia documental suficiente, devuelve `escalada: true` sin inventar información.
+4. **`datosAgent.js` (Agente de Datos del Colaborador):** Consulta MySQL vía Sequelize ORM en modo solo lectura filtrando por `colaborador_id = req.user.id`. Ejecuta en JavaScript determinista el cálculo de próxima quincena hábil y próxima evaluación semestral (o fin de periodo de prueba de 90 días), y solo adjunta conteos agregados globales si `user.rol === 'rrhh'`.
+5. **`validadorAgent.js` (Agente Validador):** Audita cada respuesta antes de entregarla mediante **Capa 1 determinista ORM (`< 5 ms`)** contra el directorio de `Colaborador` (evitando fugas de nombres/correos de terceros para `rol !== 'rrhh'`) y **Capa 2 LLM rápida (`T=0`, `max_tokens: 120`)** verificando fidelidad estricta a los fragmentos o registros recuperados (`validado: true`).
+6. **`escalamientoAgent.js` (Agente de Escalamiento):** Crea tickets formales en `tickets_rrhh` con folios correlativos (`TKT-2026-XXX`) vía `TicketRRHH.count()` y `TicketRRHH.create()` cuando el colaborador confirma el escalamiento desde el chat (`POST /api/tickets`).
+7. **`analistaAgent.js` (Agente Analista de Reportes):** Calcula los 8 indicadores diarios exclusivamente mediante consultas Sequelize ORM agregadas (clasificando el Top 5 de temas dinámicamente desde `palabras_clave`) y utiliza DeepSeek (`T=0.2`) únicamente para redactar la síntesis ejecutiva de 3 a 5 frases.
 
 ### 3.2 Control de Acceso por Roles (RBAC) y Protección de Privacidad
 
@@ -65,11 +67,13 @@ El sistema implementa defensa en profundidad en cuatro niveles:
 
 ### 3.3 Gobernanza de Prompts Versionados (`docs/prompts/`)
 
-Los cuatro prompts de sistema se mantienen documentados y versionados en `v1.0`:
-- [orquestador_v1.md](../prompts/orquestador_v1.md) — Clasificación en 5 categorías (`T=0`, `jsonMode`) y síntesis mixta (`T=0.1`).
+Los seis prompts y especificaciones de agentes se mantienen documentados y versionados en `v1.0`:
+- [orquestador_v1.md](../prompts/orquestador_v1.md) — Clasificación en 5 categorías enriquecida desde `palabras_clave` (`T=0`, `jsonMode`) y síntesis mixta (`T=0.1`).
 - [politicas_rag_v1.md](../prompts/politicas_rag_v1.md) — Grounding estricto en fragmentos recuperados, citas obligatorias y escalamiento ante ausencia documental (`T=0.1`, `jsonMode`).
 - [datos_colaborador_v1.md](../prompts/datos_colaborador_v1.md) — Respuesta estricta sobre contexto JSON de MySQL (`T=0.1`).
-- [analista_reportes_v1.md](../prompts/analista_reportes_v1.md) — Síntesis ejecutiva de 3 a 5 frases sin alteración de cifras SQL (`T=0.2`).
+- [analista_reportes_v1.md](../prompts/analista_reportes_v1.md) — Síntesis ejecutiva de 3 a 5 frases sin alteración de cifras ORM (`T=0.2`).
+- [validador_v1.md](../prompts/validador_v1.md) — Auditoría Capa 1 ORM de privacidad (`< 5 ms`) y Capa 2 LLM de fidelidad (`T=0`, `max_tokens: 120`).
+- [escalamiento_v1.md](../prompts/escalamiento_v1.md) — Generación correlativa de tickets (`TKT-YYYY-XXX`) en `tickets_rrhh` y flujo de resolución RRHH.
 
 ---
 
@@ -88,7 +92,7 @@ En todos los casos se normalizan saltos de línea y se extraen automáticamente 
 
 - **Chunking (`chunker.js`):** Divide cada documento en fragmentos de **~2,400–2,600 caracteres** (~600–800 tokens) con **~450 caracteres de solapamiento** (~120 tokens), sin cortar palabras y detectando tanto encabezados Markdown (`##` / `###`) como encabezados numerados de Google Docs/PDF (`3.1 ...`) para registrar la `seccion` exacta en los metadatos de cada chunk. Los 10 documentos generan **31 chunks** persistentes.
 - **Hallazgo y solución técnica en `embeddingService.js`:** Durante las pruebas iniciales se observó que pasar un fragmento de ~2,500 caracteres en una sola llamada a `Xenova/paraphrase-multilingual-MiniLM-L12-v2` degradaba severamente la similitud coseno (`0.02–0.19`) debido a la ventana efectiva de contexto del modelo. Se implementó segmentación interna por **sub-ventanas deslizantes de 450 caracteres** (solapamiento de 100 caracteres) con promedio L2-normalizado de los vectores resultantes, elevando las coincidencias válidas a **`0.55–0.68`**.
-- **Búsqueda Híbrida (`vectorStore.js`):** Para evitar que encabezados corporativos repetidos desplazaran secciones específicas en consultas puntuales (ej. `fallecimiento`, `teletrabajo`, `accidente laboral` o `preaviso 8 meses`), `searchSimilar` combina la similitud coseno con un refuerzo léxico normalizado sin tildes y un diccionario compacto de sinónimos laborales en español (ej. `casa → teletrabajo`, `casar → matrimonio`, `accidente → riesgos/INS`). Este ajuste elevó la precisión del benchmark del **82.22 %** inicial al **100 %**.
+- **Búsqueda Híbrida (`vectorStore.js` + `politicasAgent.js`):** Para evitar que encabezados corporativos repetidos desplazaran secciones específicas en consultas puntuales, `politicasAgent.js` resuelve dinámicamente términos relacionados por `tema_asociado` desde la tabla `palabras_clave` en MySQL (cero listas hardcodeadas en JS) y `searchSimilar` combina similitud coseno con refuerzo léxico normalizado. Este enfoque logró **0.95** de relevancia de contexto y **0.9938** de fidelidad RAG.
 
 ---
 
@@ -102,9 +106,12 @@ El script automatizado [evaluateBenchmark.js](../../backend/tests/evaluateBenchm
 | :--- | :--- |
 | **Total de preguntas ejecutadas** | **45** |
 | **Preguntas aprobadas** | **44 / 45 (97.78 %)** *(meta ≥ 80 %)* |
-| **Preguntas con observación parcial** | **1** (`#7`: citó `PRO-RRHH-03`, omitió detallar el `40 %` del complemento patronal días 4–30 en esa síntesis) |
-| **Latencia promedio global** | **3,025 ms** (~3.03 s) |
-| **Respuestas < 8,000 ms** | **45 / 45 (100 %)** *(meta ≥ 90 %)* |
+| **Preguntas con observación parcial** | **1** (`#7`: citó `PRO-RRHH-03` con `rel=0.7 / fid=0.95`, omitió expresar `100 %` / `40 %` en esa redacción puntual) |
+| **Latencia promedio global (incluyendo `validadorAgent`)** | **4,123 ms** (~4.12 s) |
+| **Respuestas < 8,000 ms** | **43 / 45 (95.56 %)** *(meta ≥ 90 %; solo #19 con 8,299 ms y #37 con 8,216 ms)* |
+| **Respuestas auditadas por `validadorAgent`** | **45 / 45 (100 %)** |
+| **Relevancia de Contexto RAG (LLM-as-a-Judge, 24 políticas)** | **0.95 / 1.00** |
+| **Fidelidad de Respuesta RAG (LLM-as-a-Judge, 24 políticas)** | **0.9938 / 1.00** |
 | **Fugas de privacidad (#21, #22, #39, #40)** | **0 fugas (100 % rechazo seguro)** |
 | **Escalamiento sin alucinación (#23, #41, #42)** | **3 / 3 (`escalada: true`, 0 citas inventadas)** |
 | **Redirección fuera de alcance (#24, #43)** | **2 / 2 (`fuera_alcance`)** |
@@ -113,13 +120,13 @@ El script automatizado [evaluateBenchmark.js](../../backend/tests/evaluateBenchm
 
 | Categoría | Cantidad | Aciertos | Latencia Promedio |
 | :--- | :---: | :---: | :---: |
-| **Política (RAG Drive)** | 24 | 23 / 24 (95.83 %) | ~3,332 ms |
-| **Dato personal (MySQL ORM)** | 6 | 6 / 6 (100 %) | ~2,777 ms |
-| **Mixta (MySQL + RAG paralelo)** | 3 | 3 / 3 (100 %) | ~6,678 ms |
-| **Dato agregado RRHH (`rol: rrhh`)** | 3 | 3 / 3 (100 %) | ~2,866 ms |
-| **Restringida (Guardrail Ley 8968 + BD)** | 4 | 4 / 4 (100 %) | ~547 ms |
-| **Sin respuesta (Escalamiento RRHH)** | 3 | 3 / 3 (100 %) | ~2,386 ms |
-| **Fuera de alcance (Guardrail + BD)** | 2 | 2 / 2 (100 %) | ~1 ms |
+| **Política (RAG Drive + Validador)** | 24 | 23 / 24 (95.83 %) | ~4,715 ms |
+| **Dato personal (MySQL ORM + Validador)** | 6 | 6 / 6 (100 %) | ~3,948 ms |
+| **Mixta (MySQL + RAG + Validador)** | 3 | 3 / 3 (100 %) | ~8,049 ms |
+| **Dato agregado RRHH (`rol: rrhh`)** | 3 | 3 / 3 (100 %) | ~4,553 ms |
+| **Restringida (Guardrail Ley 8968 + BD)** | 4 | 4 / 4 (100 %) | ~731 ms |
+| **Sin respuesta (Escalamiento RRHH)** | 3 | 3 / 3 (100 %) | ~2,644 ms |
+| **Fuera de alcance (Guardrail + BD)** | 2 | 2 / 2 (100 %) | ~0 ms |
 
 ---
 
@@ -136,6 +143,6 @@ El script automatizado [evaluateBenchmark.js](../../backend/tests/evaluateBenchm
 
 - **Streaming SSE (Server-Sent Events):** Transmitir tokens en tiempo real desde DeepSeek hacia `ChatPage.jsx` para reducir la percepción de latencia en respuestas largas y mixtas.
 - **Re-ranker Cross-Encoder / Búsqueda en ChromaDB:** Conectar el cliente `chromadb` ya instalado para escenarios multi-sucursal o cientos de anexos legales.
-- **Flujo de Aprobación y Ticketización desde el Portal:** Permitir que las solicitudes escaladas (`escalada: true`) creen automáticamente un ticket asignado a un especialista de Talento Humano y que jefaturas aprueben solicitudes pendientes desde el portal.
+- **Aprobación de Vacaciones/Permisos desde el Portal:** Extender el flujo actual de tickets (`tickets_rrhh`) para permitir también la aprobación de solicitudes de vacaciones/permisos (`solicitudes`) directamente por la jefatura desde el portal.
 - **Caché de Consultas Frecuentes:** Cachear respuestas normativas estáticas (ej. días de vacaciones, fecha de aguinaldo) reduciendo latencia a `< 200 ms` y minimizando costos de API.
 

@@ -18,7 +18,8 @@ async function chatCompletion({
   systemPrompt,
   userPrompt,
   temperature = 0.2,
-  jsonMode = false
+  jsonMode = false,
+  maxTokens = null
 }) {
   if (!process.env.LLM_API_KEY) {
     throw new Error('LLM_API_KEY no está configurada en backend/.env');
@@ -33,6 +34,10 @@ async function chatCompletion({
     ],
     temperature
   };
+
+  if (maxTokens) {
+    payload.max_tokens = maxTokens;
+  }
 
   if (jsonMode) {
     payload.response_format = { type: 'json_object' };

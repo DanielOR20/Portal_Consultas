@@ -2,14 +2,14 @@
 
 Plataforma interna de Recursos Humanos diseñada para **NovaCore Technologies Costa Rica S.A.** (empresa ficticia de desarrollo de software y servicios B2B con 250 colaboradores), construida bajo la legislación laboral vigente de la **República de Costa Rica** (Código de Trabajo Ley N.° 2, Ley N.° 7983, Ley N.° 10211, Ley N.° 7476, Ley N.° 8968, Ley N.° 9738 y reglamentos de CCSS e INS).
 
-El sistema combina **orquestación de 5 agentes especializados**, **RAG (Retrieval-Augmented Generation)** conectado a **Google Drive API**, **datos transaccionales en MySQL** con control estricto de acceso por roles (**RBAC**: `colaborador` vs `rrhh`) y un **Dashboard Analítico Diario** automatizado.
+El sistema combina **orquestación de 7 agentes especializados** (Orquestador, Políticas RAG, Datos Personales, Validador, Escalamiento, Ingesta y Analista), **RAG** conectado a **Google Drive API**, **9 tablas en MySQL** gestionadas 100 % con **Sequelize ORM (cero SQL crudo)**, control estricto de acceso por roles (**RBAC**: `colaborador` vs `rrhh`) y un **Dashboard Analítico y de Tickets** en diseño **Vino y Blanco** con interacción por voz.
 
 ---
 
 ## Tecnologías Principales
 
-- **Frontend:** React 18, Vite 6, Tailwind CSS v4, React Router, Axios, Chart.js (`react-chartjs-2`), Lucide Icons
-- **Backend:** Node.js (CommonJS), Express, Sequelize ORM (8 tablas, **100 % sin SQL crudo**), MySQL (`mysql2`), JWT (`jsonwebtoken`), `bcryptjs`, `zod`, `node-cron`
+- **Frontend:** React 18, Vite 6, Tailwind CSS v4 (paleta corporativa Vino y Blanco), React Router, Axios, Chart.js (`react-chartjs-2`), Lucide Icons, Web Speech API (reconocimiento y síntesis de voz en `es-CR`)
+- **Backend:** Node.js (CommonJS), Express, Sequelize ORM (9 tablas, **100 % sin SQL crudo**), MySQL (`mysql2`), JWT (`jsonwebtoken`), `bcryptjs`, `zod`, `node-cron`
 - **IA, RAG y Documentos:**
   - **LLM:** DeepSeek API (`deepseek-chat` vía SDK oficial `openai`)
   - **Embeddings locales multilingües:** `@xenova/transformers` (`Xenova/paraphrase-multilingual-MiniLM-L12-v2`, *sub-windows* de 450 caracteres para alta precisión semántica en español)
@@ -26,6 +26,8 @@ El sistema opera con dos flujos desacoplados (ver [diagrama_arquitectura.md](doc
    - **Agente Orquestador (`orquestadorAgent.js`):** Carga palabras clave activas desde MySQL (`palabras_clave`, 81 registros sin hardcoding en JS), clasifica la consulta en `politica`, `dato_personal`, `mixta`, `restringida` o `fuera_alcance`, aplica guardrails de privacidad (Ley N.° 8968) y registra cada interacción en `consultas_chat`.
    - **Agente de Políticas RAG (`politicasAgent.js`):** Recupera fragmentos de políticas mediante búsqueda híbrida (`minScore = 0.38`, expansión temática desde `palabras_clave`) y responde citando título, código/versión, sección y enlace a Drive; si no hay respaldo documental, escala el caso (`escalada: true`).
    - **Agente de Datos del Colaborador (`datosAgent.js`):** Consulta MySQL vía Sequelize ORM en solo lectura filtrando por `colaborador_id = req.user.id` (y agregados globales únicamente si `rol === 'rrhh'`).
+   - **Agente Validador (`validadorAgent.js`):** Audita cada respuesta antes de entregarla mediante Capa 1 determinista ORM (prevención de fugas de terceros) y Capa 2 LLM rápida de fidelidad (`validado: true`).
+   - **Agente de Escalamiento (`escalamientoAgent.js`):** Crea tickets formales con folio correlativo (`TKT-2026-XXX`) en `tickets_rrhh` cuando no existe política vigente o el colaborador solicita atención humana.
 2. **Flujos Programados (`node-cron`):**
    - **Agente de Ingesta (`06:30 a.m.` · `ingestaAgent.js`):** Sincronización incremental vía `drive.changes` y verificación de carpeta (`Docs`, `Sheets`, `PDF`).
    - **Agente Analista (`07:00 a.m.` · `analistaAgent.js`):** Calcula 8 KPIs deterministas vía Sequelize ORM (clasificando el Top 5 de temas desde `palabras_clave`), redacta un resumen ejecutivo con DeepSeek y persiste en `reportes_diarios`.
@@ -43,16 +45,16 @@ El sistema opera con dos flujos desacoplados (ver [diagrama_arquitectura.md](doc
 │   ├── .sequelizerc
 │   ├── package.json
 │   ├── src/
-│   │   ├── agents/                        # 5 agentes (ingesta, politicas, datos, orquestador, analista)
+│   │   ├── agents/                        # 7 agentes (ingesta, politicas, datos, orquestador, validador, escalamiento, analista)
 │   │   ├── config/                        # database.js y llmClient.js (DeepSeek)
-│   │   ├── controllers/                   # authController, chatController, dashboardController, ingestController
+│   │   ├── controllers/                   # authController, chatController, dashboardController, ingestController, ticketController
 │   │   ├── jobs/                          # driveSyncJob.js (06:30) y dailyReportJob.js (07:00)
 │   │   ├── middlewares/                   # authMiddleware.js (JWT) y roleMiddleware.js (RBAC)
-│   │   ├── migrations/                    # 8 migraciones SQL (incluye palabras_clave)
-│   │   ├── models/                        # 8 modelos Sequelize con asociaciones
+│   │   ├── migrations/                    # 9 migraciones SQL (incluye palabras_clave y tickets_rrhh)
+│   │   ├── models/                        # 9 modelos Sequelize con asociaciones
 │   │   ├── rag/                           # driveClient, documentParser, chunker, embeddingService, vectorStore
-│   │   ├── routes/                        # authRoutes, chatRoutes, dashboardRoutes, ingestRoutes
-│   │   ├── seeders/                       # 55 colaboradores + historial + 81 palabras_clave (100% ORM)
+│   │   ├── routes/                        # authRoutes, chatRoutes, dashboardRoutes, ingestRoutes, ticketRoutes
+│   │   ├── seeders/                       # 55 colaboradores + historial + 81 palabras_clave + 3 tickets (100% ORM)
 │   │   ├── utils/                         # jsonHelper.js
 │   │   ├── app.js
 │   │   └── server.js
@@ -148,7 +150,7 @@ npx sequelize-cli db:migrate
 npx sequelize-cli db:seed:all
 ```
 
-Esto crea las **8 tablas** (`colaboradores`, `saldos_vacaciones`, `solicitudes`, `incapacidades`, `movimientos_personal`, `consultas_chat`, `reportes_diarios`, `palabras_clave`) y pobla **55 colaboradores ficticios** (52 `colaborador`, 3 `rrhh`), saldos de vacaciones, solicitudes, incapacidades, movimientos de personal, consultas de historial y **81 palabras clave** dinámicas.
+Esto crea las **9 tablas** (`colaboradores`, `saldos_vacaciones`, `solicitudes`, `incapacidades`, `movimientos_personal`, `consultas_chat`, `reportes_diarios`, `palabras_clave`, `tickets_rrhh`) y pobla **55 colaboradores ficticios** (52 `colaborador`, 3 `rrhh`), saldos de vacaciones, solicitudes, incapacidades, movimientos de personal, consultas de historial, **81 palabras clave** dinámicas y **3 tickets RRHH** de ejemplo.
 
 ### 4. Arrancar el Proyecto (Desarrollo)
 

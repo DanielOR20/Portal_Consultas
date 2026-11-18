@@ -17,15 +17,21 @@ import {
   Activity,
   Bot,
   Calendar,
+  CheckCircle2,
   Clock,
   Database,
+  Download,
   FileWarning,
   FolderSync,
   HeartPulse,
+  KeyRound,
   Loader2,
+  Plus,
   RefreshCw,
   Search,
   ShieldAlert,
+  Ticket,
+  Trash2,
   Users
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
@@ -52,6 +58,15 @@ const PENDING_FILTERS = [
   { id: 'recent', label: 'Recientes' }
 ];
 
+const KEYWORD_CATEGORIES = [
+  { id: 'all', label: 'Todas' },
+  { id: 'restringida', label: 'restringida' },
+  { id: 'fuera_alcance', label: 'fuera_alcance' },
+  { id: 'dato_personal', label: 'dato_personal' },
+  { id: 'politica', label: 'politica' },
+  { id: 'tema_dashboard', label: 'tema_dashboard' }
+];
+
 export default function DashboardPage() {
   const { showToast } = useToast();
 
@@ -59,6 +74,18 @@ export default function DashboardPage() {
   const [fechasDisponibles, setFechasDisponibles] = useState([]);
   const [selectedFecha, setSelectedFecha] = useState('');
   const [ingestStatus, setIngestStatus] = useState(null);
+
+  const [tickets, setTickets] = useState([]);
+  const [resolvingTicketId, setResolvingTicketId] = useState(null);
+  const [ticketReplies, setTicketReplies] = useState({});
+  const [savingTicketId, setSavingTicketId] = useState(null);
+
+  const [keywords, setKeywords] = useState([]);
+  const [kwCategoryFilter, setKwCategoryFilter] = useState('all');
+  const [newKwPalabra, setNewKwPalabra] = useState('');
+  const [newKwCategoria, setNewKwCategoria] = useState('restringida');
+  const [newKwTema, setNewKwTema] = useState('');
+  const [savingKeyword, setSavingKeyword] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
@@ -76,10 +103,12 @@ export default function DashboardPage() {
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [latestRes, historyRes, ingestRes] = await Promise.all([
+      const [latestRes, historyRes, ingestRes, ticketsRes, kwRes] = await Promise.all([
         api.get('/dashboard/latest'),
         api.get('/dashboard/history'),
-        api.get('/ingest/status')
+        api.get('/ingest/status'),
+        api.get('/tickets'),
+        api.get('/dashboard/keywords?all=true')
       ]);
 
       const rep = latestRes.data?.reporte || null;
@@ -87,6 +116,8 @@ export default function DashboardPage() {
       setSelectedFecha(rep?.fecha || '');
       setFechasDisponibles(historyRes.data?.fechas_disponibles || (rep ? [rep.fecha] : []));
       setIngestStatus(ingestRes.data || null);
+      setTickets(ticketsRes.data?.tickets || []);
+      setKeywords(kwRes.data?.keywords || []);
     } catch (err) {
       showToast(
         err?.response?.data?.error || 'No se pudo cargar el dashboard de RRHH.',
@@ -170,6 +201,141 @@ export default function DashboardPage() {
     }
   };
 
+  const handleDownloadJson = () => {
+    if (!reporte) return;
+    const payload = {
+      fecha: reporte.fecha,
+      generado_por: reporte.generado_por,
+      resumen_ejecutivo: reporte.resumen_texto,
+      indicadores: reporte.datos_json
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reporte-rrhh-${reporte.fecha}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Reporte JSON descargado (reporte-rrhh-${reporte.fecha}.json).`, 'success');
+  };
+
+  const handleDownloadCsv = () => {
+    if (!reporte) return;
+    const d = reporte.datos_json || {};
+    const rows = [
+      ['Seccion', 'Indicador', 'Valor'],
+      ['General', 'Fecha del Reporte', reporte.fecha],
+      ['General', 'Resumen Ejecutivo', reporte.resumen_texto],
+      ['Ausencias', 'Total Ausentes Hoy', d.ausentes_hoy?.total ?? 0],
+      ['Ausencias', 'Vacaciones Hoy', d.ausentes_hoy?.por_tipo?.vacaciones ?? 0],
+      ['Ausencias', 'Permisos Hoy', (d.ausentes_hoy?.por_tipo?.permiso_con_goce ?? 0) + (d.ausentes_hoy?.por_tipo?.permiso_sin_goce ?? 0)],
+      ['Ausencias', 'Incapacidades Hoy', d.ausentes_hoy?.por_tipo?.incapacidad ?? 0],
+      ['Solicitudes', 'Total Pendientes', d.solicitudes_pendientes?.total ?? 0],
+      ['Solicitudes', 'Atrasadas > 3 días', d.solicitudes_pendientes?.atrasadas_mas_3_dias ?? 0],
+      ['Incapacidades', 'Activas Hoy', d.incapacidades_mes?.activas_hoy ?? 0],
+      ['Incapacidades', 'Total Días Mes', d.incapacidades_mes?.total_dias_mes ?? 0],
+      ['Rotación', 'Colaboradores Activos', d.rotacion_personal?.total_activos ?? 0],
+      ['Rotación', 'Tasa Rotación Mensual (%)', d.rotacion_personal?.tasa_rotacion_pct ?? 0],
+      ['Pasivo Vacaciones', 'Colaboradores > 20 días', d.riesgo_pasivo_vacaciones?.total_colaboradores ?? 0],
+      ['Chatbot', 'Consultas Últimas 24h', d.metricas_chatbot?.consultas_ultimas_24h ?? 0],
+      ['Chatbot', 'Resueltas sin Escalar (%)', d.metricas_chatbot?.porcentaje_resueltas_sin_escalar ?? 0],
+      ['Chatbot', 'Latencia Promedio (ms)', d.metricas_chatbot?.latencia_promedio_ms ?? 0]
+    ];
+
+    const csvContent =
+      '\uFEFF' +
+      rows
+        .map((r) => r.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reporte-rrhh-${reporte.fecha}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Reporte CSV descargado (reporte-rrhh-${reporte.fecha}.csv).`, 'success');
+  };
+
+  const handleResolveTicket = async (ticketId) => {
+    const replyText = String(ticketReplies[ticketId] || '').trim();
+    if (replyText.length < 5) {
+      showToast('Escribe una respuesta oficial de al menos 5 caracteres.', 'error');
+      return;
+    }
+
+    setSavingTicketId(ticketId);
+    try {
+      const { data } = await api.patch(`/tickets/${ticketId}/resolve`, {
+        respuesta_rrhh: replyText,
+        estado: 'resuelto'
+      });
+
+      setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)));
+      setResolvingTicketId(null);
+      showToast(`Ticket ${data.ticket.codigo} marcado como resuelto.`, 'success');
+    } catch (err) {
+      showToast(err?.response?.data?.error || 'Error al resolver el ticket.', 'error');
+    } finally {
+      setSavingTicketId(null);
+    }
+  };
+
+  const handleCreateKeyword = async (e) => {
+    e.preventDefault();
+    if (!newKwPalabra.trim()) return;
+
+    setSavingKeyword(true);
+    try {
+      const { data } = await api.post('/dashboard/keywords', {
+        palabra: newKwPalabra.trim(),
+        categoria: newKwCategoria,
+        tema_asociado: newKwTema.trim() || null
+      });
+
+      setKeywords((prev) => [...prev, data.keyword]);
+      setNewKwPalabra('');
+      setNewKwTema('');
+      showToast(
+        `Palabra clave "${data.keyword.palabra}" agregada en ${data.keyword.categoria}.`,
+        'success'
+      );
+    } catch (err) {
+      showToast(err?.response?.data?.error || 'No se pudo agregar la palabra clave.', 'error');
+    } finally {
+      setSavingKeyword(false);
+    }
+  };
+
+  const handleToggleKeyword = async (kw) => {
+    try {
+      const { data } = await api.patch(`/dashboard/keywords/${kw.id}`, {
+        activa: !kw.activa
+      });
+      setKeywords((prev) =>
+        prev.map((item) => (item.id === kw.id ? { ...item, activa: Boolean(data.keyword.activa) } : item))
+      );
+      showToast(
+        `"${kw.palabra}" ${data.keyword.activa ? 'activada' : 'desactivada'} (caché actualizada).`,
+        'info',
+        2500
+      );
+    } catch (err) {
+      showToast(err?.response?.data?.error || 'Error al actualizar palabra clave.', 'error');
+    }
+  };
+
+  const handleDeleteKeyword = async (kw) => {
+    try {
+      await api.delete(`/dashboard/keywords/${kw.id}`);
+      setKeywords((prev) => prev.filter((item) => item.id !== kw.id));
+      showToast(`Palabra clave "${kw.palabra}" eliminada.`, 'info', 2500);
+    } catch (err) {
+      showToast(err?.response?.data?.error || 'Error al eliminar palabra clave.', 'error');
+    }
+  };
+
   const datos = reporte?.datos_json || {};
   const ausentesHoy = datos.ausentes_hoy || { total: 0, por_tipo: {}, por_departamento: {} };
   const solicitudesPendientes = datos.solicitudes_pendientes || {
@@ -218,6 +384,13 @@ export default function DashboardPage() {
     });
   }, [solicitudesPendientes.detalle, pendingSearch, pendingFilter]);
 
+  const filteredKeywords = useMemo(() => {
+    if (kwCategoryFilter === 'all') return keywords;
+    return keywords.filter((k) => k.categoria === kwCategoryFilter);
+  }, [keywords, kwCategoryFilter]);
+
+  const openTicketsCount = tickets.filter((t) => t.estado !== 'resuelto').length;
+
   // Chart.js - Tendencia 30 días (Paleta Vino y Blanco)
   const lineChartData = {
     labels: tendencia30.map((d) => d.fecha.slice(5)),
@@ -259,7 +432,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Chart.js - Top Temas Consultados (Bar)
   const topIntenciones = temasYBrechas.top_5_intenciones || [];
   const barChartData = {
     labels: topIntenciones.map((t) => t.intencion),
@@ -276,9 +448,7 @@ export default function DashboardPage() {
   const barChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false }
-    },
+    plugins: { legend: { display: false } },
     scales: {
       x: { ticks: { color: '#1F1416', font: { size: 10 } }, grid: { display: false } },
       y: {
@@ -289,7 +459,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Chart.js - Ausencias por Departamento (Doughnut)
   const deptoEntries = Object.entries(ausentesHoy.por_departamento || {});
   const doughnutData = {
     labels: deptoEntries.length > 0 ? deptoEntries.map(([d]) => d) : ['Sin ausencias hoy'],
@@ -323,20 +492,19 @@ export default function DashboardPage() {
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         {/* Barra de Control Superior */}
-        <section className="flex flex-col justify-between gap-4 rounded-2xl border border-[#F3D5DB] bg-white p-4 shadow-sm lg:flex-row lg:items-center">
+        <section className="flex flex-col justify-between gap-4 rounded-2xl border border-[#F3D5DB] bg-white p-4 shadow-sm xl:flex-row xl:items-center">
           <div>
             <h1 className="text-lg font-bold text-[#4E1A21]">
-              Centro de Analítica y Cumplimiento RRHH
+              Centro de Analítica, Tickets y Cumplimiento RRHH
             </h1>
             <p className="text-xs text-[#6E5A5E]">
-              Reporte diario automatizado · Activos:{' '}
-              <strong className="text-[#1F1416]">{rotacion.total_activos}</strong> · Rotación
-              mensual: <strong className="text-[#722F37]">{rotacion.tasa_rotacion_pct}%</strong>
+              Activos: <strong className="text-[#1F1416]">{rotacion.total_activos}</strong> ·
+              Rotación mensual: <strong className="text-[#722F37]">{rotacion.tasa_rotacion_pct}%</strong>{' '}
+              · Tickets abiertos: <strong className="text-[#722F37]">{openTicketsCount}</strong>
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Estado indexación Drive */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-2 rounded-xl border border-[#F3D5DB] bg-[#FDF2F4] px-3 py-2 text-xs">
               <Database className="h-4 w-4 text-[#722F37]" />
               <span className="text-[#4E1A21]">
@@ -349,7 +517,6 @@ export default function DashboardPage() {
               </span>
             </div>
 
-            {/* Selector de fecha histórica */}
             <div className="flex items-center gap-2 rounded-xl border border-[#F3D5DB] bg-[#FAF7F8] px-3 py-1.5">
               <Calendar className="h-4 w-4 text-[#722F37]" />
               <select
@@ -363,6 +530,30 @@ export default function DashboardPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Exportar Reporte (CSV / JSON) */}
+            <div className="inline-flex items-center overflow-hidden rounded-xl border border-[#F3D5DB] bg-[#FAF7F8]">
+              <span className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-semibold text-[#6E5A5E]">
+                <Download className="h-3.5 w-3.5 text-[#722F37]" />
+                Descargar Reporte:
+              </span>
+              <button
+                type="button"
+                onClick={handleDownloadCsv}
+                disabled={!reporte}
+                className="border-l border-[#F3D5DB] bg-white px-2.5 py-2 text-[11px] font-bold text-[#722F37] transition hover:bg-[#FDF2F4] cursor-pointer"
+              >
+                CSV
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadJson}
+                disabled={!reporte}
+                className="border-l border-[#F3D5DB] bg-white px-2.5 py-2 text-[11px] font-bold text-[#722F37] transition hover:bg-[#FDF2F4] cursor-pointer"
+              >
+                JSON
+              </button>
             </div>
 
             <button
@@ -422,7 +613,6 @@ export default function DashboardPage() {
 
             {/* 5 Tarjetas KPI Interactivas */}
             <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-              {/* KPI 1 */}
               <button
                 type="button"
                 onClick={() => scrollToSection(chartsRef, 'charts')}
@@ -441,7 +631,6 @@ export default function DashboardPage() {
                 </p>
               </button>
 
-              {/* KPI 2 - Interactiva hacia Tabla de Solicitudes */}
               <button
                 type="button"
                 onClick={() => scrollToSection(pendingTableRef, 'pending')}
@@ -459,7 +648,6 @@ export default function DashboardPage() {
                 </p>
               </button>
 
-              {/* KPI 3 */}
               <button
                 type="button"
                 onClick={() => scrollToSection(chartsRef, 'charts')}
@@ -480,7 +668,6 @@ export default function DashboardPage() {
                 </p>
               </button>
 
-              {/* KPI 4 - Interactiva hacia Alerta Pasivo */}
               <button
                 type="button"
                 onClick={() => scrollToSection(passiveAlertRef, 'passive')}
@@ -498,7 +685,6 @@ export default function DashboardPage() {
                 </p>
               </button>
 
-              {/* KPI 5 - Interactiva hacia Brechas */}
               <button
                 type="button"
                 onClick={() => scrollToSection(gapsAlertRef, 'gaps')}
@@ -523,7 +709,9 @@ export default function DashboardPage() {
             <section
               ref={chartsRef}
               className={`grid grid-cols-1 gap-5 rounded-2xl transition-all lg:grid-cols-12 ${
-                highlightedSection === 'charts' ? 'ring-2 ring-[#722F37] ring-offset-4 ring-offset-[#FAF7F8]' : ''
+                highlightedSection === 'charts'
+                  ? 'ring-2 ring-[#722F37] ring-offset-4 ring-offset-[#FAF7F8]'
+                  : ''
               }`}
             >
               <div className="rounded-2xl border border-[#F3D5DB] bg-white p-5 shadow-sm lg:col-span-6">
@@ -549,6 +737,118 @@ export default function DashboardPage() {
                 <div className="h-64">
                   <Doughnut data={doughnutData} options={doughnutOptions} />
                 </div>
+              </div>
+            </section>
+
+            {/* Bandeja de Tickets Escalados por Colaboradores */}
+            <section className="rounded-2xl border border-[#F3D5DB] bg-white p-5 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Ticket className="h-4 w-4 text-[#722F37]" />
+                  <div>
+                    <h3 className="text-sm font-bold text-[#4E1A21]">
+                      Bandeja de Tickets Escalados a Talento Humano
+                    </h3>
+                    <p className="text-xs text-[#6E5A5E]">
+                      Consultas sin política vigente enviadas por colaboradores para resolución oficial
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-[#722F37] px-3 py-0.5 text-[11px] font-bold text-white">
+                  {openTicketsCount} pendientes
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {tickets.length === 0 ? (
+                  <p className="text-xs text-[#6E5A5E]">No hay tickets registrados.</p>
+                ) : (
+                  tickets.map((tkt) => {
+                    const isResolved = tkt.estado === 'resuelto';
+                    const isEditing = resolvingTicketId === tkt.id;
+
+                    return (
+                      <div
+                        key={tkt.id}
+                        className="rounded-xl border border-[#F3D5DB] bg-[#FAF7F8] p-4 text-xs"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-[#4E1A21]">{tkt.codigo}</span>
+                              <span
+                                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${
+                                  isResolved
+                                    ? 'border border-[#F3D5DB] bg-white text-[#722F37]'
+                                    : 'bg-[#722F37] text-white'
+                                }`}
+                              >
+                                {tkt.estado}
+                              </span>
+                              <span className="text-[11px] text-[#6E5A5E]">
+                                {tkt.colaborador?.nombre} ({tkt.colaborador?.departamento})
+                              </span>
+                            </div>
+                            <p className="font-medium text-[#1F1416]">{tkt.consulta_original}</p>
+                            <p className="text-[11px] text-[#6E5A5E]">Motivo: {tkt.motivo}</p>
+                          </div>
+
+                          {!isResolved && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setResolvingTicketId(isEditing ? null : tkt.id)
+                              }
+                              className="rounded-lg bg-[#722F37] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#5A2229] cursor-pointer"
+                            >
+                              {isEditing ? 'Cancelar' : 'Responder y Resolver'}
+                            </button>
+                          )}
+                        </div>
+
+                        {isResolved && tkt.respuesta_rrhh && (
+                          <div className="mt-3 rounded-lg border border-[#F3D5DB] bg-white p-3">
+                            <p className="flex items-center gap-1.5 text-[11px] font-bold text-[#722F37]">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Respuesta Oficial ({tkt.atendedor?.nombre || 'RRHH'}):
+                            </p>
+                            <p className="mt-1 text-xs text-[#1F1416]">{tkt.respuesta_rrhh}</p>
+                          </div>
+                        )}
+
+                        {isEditing && (
+                          <div className="mt-3 space-y-2 rounded-lg border border-[#F3D5DB] bg-white p-3">
+                            <textarea
+                              rows={2}
+                              value={ticketReplies[tkt.id] || ''}
+                              onChange={(e) =>
+                                setTicketReplies((prev) => ({
+                                  ...prev,
+                                  [tkt.id]: e.target.value
+                                }))
+                              }
+                              placeholder="Escribe la respuesta oficial de Talento Humano para el colaborador..."
+                              className="w-full rounded-lg border border-[#F3D5DB] bg-[#FAF7F8] p-2.5 text-xs text-[#1F1416] outline-none focus:border-[#722F37] focus:bg-white"
+                            />
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                disabled={savingTicketId === tkt.id}
+                                onClick={() => handleResolveTicket(tkt.id)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-[#722F37] px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-[#5A2229] disabled:opacity-50 cursor-pointer"
+                              >
+                                {savingTicketId === tkt.id && (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                )}
+                                <span>Marcar como Resuelto</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </section>
 
@@ -661,9 +961,135 @@ export default function DashboardPage() {
               </div>
             </section>
 
+            {/* Gestor Visual CRUD de Palabras Clave (palabras_clave) */}
+            <section className="rounded-2xl border border-[#F3D5DB] bg-white p-5 shadow-sm">
+              <div className="mb-4 flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-[#722F37]" />
+                  <div>
+                    <h3 className="text-sm font-bold text-[#4E1A21]">
+                      Gestor Dinámico de Palabras Clave (MySQL · `palabras_clave`)
+                    </h3>
+                    <p className="text-xs text-[#6E5A5E]">
+                      Administra reglas de privacidad, fuera de alcance y clasificación temática en
+                      tiempo real ({keywords.length} registros)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {KEYWORD_CATEGORIES.map((cat) => {
+                    const active = kwCategoryFilter === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setKwCategoryFilter(cat.id)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${
+                          active
+                            ? 'bg-[#722F37] text-white'
+                            : 'border border-[#F3D5DB] bg-[#FAF7F8] text-[#6E5A5E] hover:bg-[#FDF2F4] hover:text-[#722F37]'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Formulario rápido de alta */}
+              <form
+                onSubmit={handleCreateKeyword}
+                className="mb-4 grid grid-cols-1 gap-2.5 rounded-xl border border-[#F3D5DB] bg-[#FDF2F4] p-3.5 sm:grid-cols-4"
+              >
+                <input
+                  type="text"
+                  required
+                  value={newKwPalabra}
+                  onChange={(e) => setNewKwPalabra(e.target.value)}
+                  placeholder="Nueva palabra o frase clave..."
+                  className="rounded-lg border border-[#F3D5DB] bg-white px-3 py-2 text-xs text-[#1F1416] outline-none focus:border-[#722F37]"
+                />
+                <select
+                  value={newKwCategoria}
+                  onChange={(e) => setNewKwCategoria(e.target.value)}
+                  className="rounded-lg border border-[#F3D5DB] bg-white px-3 py-2 text-xs font-medium text-[#1F1416] outline-none focus:border-[#722F37] cursor-pointer"
+                >
+                  <option value="restringida">restringida</option>
+                  <option value="fuera_alcance">fuera_alcance</option>
+                  <option value="dato_personal">dato_personal</option>
+                  <option value="politica">politica</option>
+                  <option value="tema_dashboard">tema_dashboard</option>
+                </select>
+                <input
+                  type="text"
+                  value={newKwTema}
+                  onChange={(e) => setNewKwTema(e.target.value)}
+                  placeholder="Tema asociado (opcional)"
+                  className="rounded-lg border border-[#F3D5DB] bg-white px-3 py-2 text-xs text-[#1F1416] outline-none focus:border-[#722F37]"
+                />
+                <button
+                  type="submit"
+                  disabled={savingKeyword}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#722F37] px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-[#5A2229] disabled:opacity-50 cursor-pointer"
+                >
+                  {savingKeyword ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" />
+                  )}
+                  <span>Agregar Palabra</span>
+                </button>
+              </form>
+
+              <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredKeywords.map((kw) => (
+                  <div
+                    key={kw.id}
+                    className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs ${
+                      kw.activa
+                        ? 'border-[#F3D5DB] bg-[#FAF7F8]'
+                        : 'border-slate-200 bg-slate-50 opacity-65'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-bold text-[#1F1416]">{kw.palabra}</p>
+                      <p className="truncate text-[10px] text-[#6E5A5E]">
+                        <span className="font-semibold text-[#722F37]">{kw.categoria}</span>
+                        {kw.tema_asociado ? ` · ${kw.tema_asociado}` : ''}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleKeyword(kw)}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold transition cursor-pointer ${
+                          kw.activa
+                            ? 'bg-[#722F37] text-white'
+                            : 'border border-[#F3D5DB] bg-white text-[#6E5A5E]'
+                        }`}
+                      >
+                        {kw.activa ? 'Activa' : 'Inactiva'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteKeyword(kw)}
+                        aria-label={`Eliminar ${kw.palabra}`}
+                        className="rounded-md p-1 text-[#6E5A5E] transition hover:bg-[#FDF2F4] hover:text-[#722F37] cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
             {/* Paneles de Alertas de RRHH (2 columnas) */}
             <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              {/* Columna 1: Pasivo de vacaciones > 20 días */}
               <div
                 ref={passiveAlertRef}
                 className={`rounded-2xl border bg-white p-5 shadow-sm transition-all ${
@@ -702,7 +1128,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Columna 2: Preguntas escaladas / Brechas documentales */}
               <div
                 ref={gapsAlertRef}
                 className={`rounded-2xl border bg-white p-5 shadow-sm transition-all ${

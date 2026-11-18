@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bot,
   CalendarDays,
   Check,
+  CheckCircle2,
   Clock,
   Copy,
   Cpu,
@@ -11,10 +12,16 @@ import {
   FileText,
   History,
   Loader2,
+  Mic,
+  MicOff,
   Send,
+  ShieldCheck,
   Sparkles,
+  Square,
+  Ticket,
   Trash2,
-  User as UserIcon
+  User as UserIcon,
+  Volume2
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import { useAuth } from '../hooks/useAuth';
@@ -88,10 +95,22 @@ const WELCOME_MESSAGE = {
     '¡Hola! Soy el asistente interno de Talento Humano de **NovaCore Technologies Costa Rica S.A.** Puedo responder dudas sobre políticas oficiales, legislación laboral vigente en Costa Rica y consultar tu saldo de vacaciones, solicitudes o fechas de pago.',
   citas: [],
   escalada: false,
+  validado: true,
   agente: 'AgenteOrquestador',
   intencion: 'bienvenida',
   latencia_ms: null
 };
+
+function stripMarkdownForSpeech(text) {
+  return String(text || '')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\|/g, ', ')
+    .replace(/\n+/g, '. ')
+    .trim();
+}
 
 export default function ChatPage() {
   const { user, saldoVacaciones } = useAuth();
@@ -99,32 +118,72 @@ export default function ChatPage() {
 
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [recentLogs, setRecentLogs] = useState([]);
+  const [myTickets, setMyTickets] = useState([]);
   const [activeCategory, setActiveCategory] = useState('Todas');
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingTickets, setLoadingTickets] = useState(true);
   const [copiedId, setCopiedId] = useState(null);
-  const [escalatedConfirmed, setEscalatedConfirmed] = useState({});
+  const [createdTicketsMap, setCreatedTicketsMap] = useState({});
+  const [creatingTicketId, setCreatingTicketId] = useState(null);
 
+  // Estado de voz (Web Speech API)
+  const [listening, setListening] = useState(false);
+  const [speakingMsgId, setSpeakingMsgId] = useState(null);
+  const recognitionRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+  const loadMyTickets = useCallback(async () => {
+    try {
+      const { data } = await api.get('/tickets/mine');
+      if (Array.isArray(data?.tickets)) {
+        setMyTickets(data.tickets);
+      }
+    } catch {
+      // Silencioso si falla temporalmente
+    } finally {
+      setLoadingTickets(false);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
-    async function loadHistory() {
+    async function loadInitial() {
       try {
-        const { data } = await api.get('/chat/history');
-        if (mounted && Array.isArray(data.historial)) {
-          setRecentLogs(data.historial);
+        const [histRes, ticketsRes] = await Promise.all([
+          api.get('/chat/history'),
+          api.get('/tickets/mine')
+        ]);
+        if (mounted && Array.isArray(histRes.data?.historial)) {
+          setRecentLogs(histRes.data.historial);
+        }
+        if (mounted && Array.isArray(ticketsRes.data?.tickets)) {
+          setMyTickets(ticketsRes.data.tickets);
         }
       } catch {
-        // Silencioso si aún no hay historial disponible
+        // Silencioso si aún no hay datos
       } finally {
-        if (mounted) setLoadingHistory(false);
+        if (mounted) {
+          setLoadingHistory(false);
+          setLoadingTickets(false);
+        }
       }
     }
-    loadHistory();
+    loadInitial();
+
     return () => {
       mounted = false;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
     };
   }, []);
 
@@ -167,9 +226,11 @@ export default function ChatPage() {
       const assistantMsg = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
+        preguntaOrigen: trimmed,
         content: data.respuesta,
         citas: data.citas || [],
         escalada: Boolean(data.escalada),
+        validado: data.validado !== false,
         agente: data.agente,
         intencion: data.intencion,
         latencia_ms: data.latencia_ms
@@ -196,6 +257,7 @@ export default function ChatPage() {
             'Ocurrió un inconveniente al consultar los agentes de RRHH. Intenta nuevamente.',
           citas: [],
           escalada: false,
+          validado: false,
           agente: 'Sistema',
           intencion: 'error',
           latencia_ms: null
@@ -219,6 +281,88 @@ export default function ChatPage() {
     }
   };
 
+  const handleToggleVoiceInput = () => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      showToast(
+        'Tu navegador no soporta reconocimiento de voz nativo (usa Chrome o Edge).',
+        'error'
+      );
+      return;
+    }
+
+    if (listening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'es-CR';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setListening(true);
+        showToast('Escuchando consulta por voz (es-CR)...', 'info', 2500);
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results?.[0]?.[0]?.transcript || '';
+        if (transcript.trim()) {
+          setInput((prev) => (prev ? `${prev} ${transcript.trim()}` : transcript.trim()));
+          showToast('Voz transcrita al cuadro de consulta.', 'success', 2200);
+        }
+      };
+
+      recognition.onerror = () => {
+        setListening(false);
+        showToast('No se detectó audio o se denegó el acceso al micrófono.', 'error');
+      };
+
+      recognition.onend = () => {
+        setListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setListening(false);
+      showToast('No fue posible iniciar el micrófono.', 'error');
+    }
+  };
+
+  const handleToggleSpeak = (msgId, text) => {
+    if (!('speechSynthesis' in window)) {
+      showToast('Tu navegador no soporta lectura de voz (speechSynthesis).', 'error');
+      return;
+    }
+
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(text));
+    utterance.lang = 'es-CR';
+    utterance.rate = 1.0;
+
+    utterance.onend = () => {
+      setSpeakingMsgId((prev) => (prev === msgId ? null : prev));
+    };
+    utterance.onerror = () => {
+      setSpeakingMsgId((prev) => (prev === msgId ? null : prev));
+    };
+
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
   const handleCopyMessage = async (msgId, text) => {
     try {
       await navigator.clipboard.writeText(String(text || ''));
@@ -232,12 +376,35 @@ export default function ChatPage() {
     }
   };
 
-  const handleConfirmEscalation = (msgId) => {
-    setEscalatedConfirmed((prev) => ({ ...prev, [msgId]: true }));
-    showToast('Solicitud enviada y registrada para revisión de Talento Humano.', 'info');
+  const handleCreateTicket = async (msg) => {
+    if (createdTicketsMap[msg.id] || creatingTicketId === msg.id) return;
+
+    setCreatingTicketId(msg.id);
+    try {
+      const { data } = await api.post('/tickets', {
+        consulta_original: msg.preguntaOrigen || 'Consulta escalada desde el chat',
+        motivo: 'Consulta escalada sin política vigente en Google Drive'
+      });
+
+      const codigo = data.ticket?.codigo || 'TKT-2026-NEW';
+      setCreatedTicketsMap((prev) => ({ ...prev, [msg.id]: codigo }));
+      showToast(`Ticket #${codigo} creado y enviado a Talento Humano.`, 'success', 4000);
+      await loadMyTickets();
+    } catch (err) {
+      showToast(
+        err?.response?.data?.error || 'No se pudo registrar el ticket en RRHH.',
+        'error'
+      );
+    } finally {
+      setCreatingTicketId(null);
+    }
   };
 
   const handleClearChat = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+    }
     setMessages([WELCOME_MESSAGE]);
     showToast('Vista de conversación limpiada.', 'info', 2200);
   };
@@ -311,7 +478,7 @@ export default function ChatPage() {
                   <span className="text-[11px] font-semibold text-[#9E3344]">{progressPct}%</span>
                 </div>
 
-                <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white border border-[#F3D5DB]">
+                <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full border border-[#F3D5DB] bg-white">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-[#722F37] to-[#9E3344] transition-all duration-500"
                     style={{ width: `${progressPct}%` }}
@@ -320,14 +487,75 @@ export default function ChatPage() {
 
                 <div className="mt-2.5 flex justify-between text-[11px] text-[#6E5A5E]">
                   <span>
-                    Asignados: <strong className="text-[#1F1416]">{formatNumber(diasAsignados, 2)}</strong>
+                    Asignados:{' '}
+                    <strong className="text-[#1F1416]">{formatNumber(diasAsignados, 2)}</strong>
                   </span>
                   <span>
-                    Tomados: <strong className="text-[#1F1416]">{formatNumber(diasTomados, 2)}</strong>
+                    Tomados:{' '}
+                    <strong className="text-[#1F1416]">{formatNumber(diasTomados, 2)}</strong>
                   </span>
                 </div>
               </div>
             </div>
+          </section>
+
+          {/* Mis Tickets RRHH */}
+          <section className="rounded-2xl border border-[#F3D5DB] bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Ticket className="h-4 w-4 text-[#722F37]" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#4E1A21]">
+                  Mis Tickets RRHH
+                </h3>
+              </div>
+              <span className="rounded-full bg-[#FDF2F4] px-2 py-0.5 text-[11px] font-bold text-[#722F37]">
+                {myTickets.length}
+              </span>
+            </div>
+
+            {loadingTickets ? (
+              <p className="text-xs text-[#6E5A5E]">Cargando tickets...</p>
+            ) : myTickets.length === 0 ? (
+              <p className="text-xs text-[#6E5A5E]">
+                No tienes tickets escalados a Talento Humano.
+              </p>
+            ) : (
+              <div className="max-h-56 space-y-2.5 overflow-y-auto pr-1">
+                {myTickets.map((tkt) => {
+                  const resolved = tkt.estado === 'resuelto';
+                  return (
+                    <div
+                      key={tkt.id}
+                      className="rounded-xl border border-[#F3D5DB] bg-[#FAF7F8] p-2.5 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[#4E1A21]">{tkt.codigo}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                            resolved
+                              ? 'bg-[#FDF2F4] text-[#722F37] border border-[#F3D5DB]'
+                              : 'bg-[#722F37] text-white'
+                          }`}
+                        >
+                          {tkt.estado}
+                        </span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[11px] text-[#1F1416]">
+                        {tkt.consulta_original}
+                      </p>
+                      {resolved && tkt.respuesta_rrhh && (
+                        <div className="mt-2 rounded-lg border border-[#F3D5DB] bg-white p-2 text-[11px] text-[#1F1416]">
+                          <span className="block font-bold text-[#722F37]">
+                            Respuesta RRHH:
+                          </span>
+                          <p className="mt-0.5 leading-relaxed">{tkt.respuesta_rrhh}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           {/* Explorador de Preguntas Sugeridas con Filtros */}
@@ -359,7 +587,7 @@ export default function ChatPage() {
               })}
             </div>
 
-            <div className="flex max-h-60 flex-col gap-2 overflow-y-auto pr-1">
+            <div className="flex max-h-52 flex-col gap-2 overflow-y-auto pr-1">
               {filteredSuggestions.map((item) => (
                 <button
                   key={item.pregunta}
@@ -393,7 +621,7 @@ export default function ChatPage() {
             ) : recentLogs.length === 0 ? (
               <p className="text-xs text-[#6E5A5E]">Aún no tienes consultas registradas.</p>
             ) : (
-              <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
                 {recentLogs.slice(0, 8).map((item) => (
                   <button
                     key={item.id}
@@ -416,10 +644,10 @@ export default function ChatPage() {
         </aside>
 
         {/* Área central de conversación */}
-        <section className="flex h-[calc(100vh-8.5rem)] min-h-[560px] flex-col rounded-2xl border border-[#F3D5DB] bg-white shadow-sm lg:col-span-8 xl:col-span-9">
+        <section className="flex h-[calc(100vh-8.5rem)] min-h-[580px] flex-col rounded-2xl border border-[#F3D5DB] bg-white shadow-sm lg:col-span-8 xl:col-span-9">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F3D5DB] px-5 py-3.5">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FDF2F4] border border-[#F3D5DB] text-[#722F37]">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#F3D5DB] bg-[#FDF2F4] text-[#722F37]">
                 <Bot className="h-5 w-5" />
               </div>
               <div>
@@ -427,7 +655,7 @@ export default function ChatPage() {
                   Asistente Virtual de Talento Humano
                 </h1>
                 <p className="text-[11px] text-[#6E5A5E]">
-                  Políticas oficiales en Google Drive + Datos personales verificados en MySQL
+                  Políticas oficiales en Google Drive + Datos MySQL + Validación de fidelidad y voz
                 </p>
               </div>
             </div>
@@ -446,7 +674,9 @@ export default function ChatPage() {
             {messages.map((msg) => {
               const isUser = msg.role === 'user';
               const isCopied = copiedId === msg.id;
-              const isConfirmed = Boolean(escalatedConfirmed[msg.id]);
+              const isSpeaking = speakingMsgId === msg.id;
+              const createdTicketCode = createdTicketsMap[msg.id];
+              const isCreatingTicket = creatingTicketId === msg.id;
 
               return (
                 <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -461,38 +691,62 @@ export default function ChatPage() {
                       <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                     ) : (
                       <>
-                        <div className="mb-2 flex items-center justify-between gap-3 border-b border-[#F3D5DB]/70 pb-2">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-[#F3D5DB]/70 pb-2">
                           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#722F37]">
                             <Bot className="h-3.5 w-3.5" />
                             Respuesta del Asistente
                           </span>
 
-                          <button
-                            type="button"
-                            onClick={() => handleCopyMessage(msg.id, msg.content)}
-                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition cursor-pointer ${
-                              isCopied
-                                ? 'border-[#722F37] bg-[#722F37] text-white'
-                                : 'border-[#F3D5DB] bg-[#FAF7F8] text-[#6E5A5E] hover:bg-[#FDF2F4] hover:text-[#722F37]'
-                            }`}
-                          >
-                            {isCopied ? (
-                              <>
-                                <Check className="h-3 w-3" />
-                                <span>¡Copiado!</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3 w-3" />
-                                <span>Copiar respuesta</span>
-                              </>
-                            )}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSpeak(msg.id, msg.content)}
+                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition cursor-pointer ${
+                                isSpeaking
+                                  ? 'border-[#722F37] bg-[#722F37] text-white'
+                                  : 'border-[#F3D5DB] bg-[#FAF7F8] text-[#6E5A5E] hover:bg-[#FDF2F4] hover:text-[#722F37]'
+                              }`}
+                            >
+                              {isSpeaking ? (
+                                <>
+                                  <Square className="h-3 w-3" />
+                                  <span>Detener</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Volume2 className="h-3 w-3" />
+                                  <span>Escuchar</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMessage(msg.id, msg.content)}
+                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition cursor-pointer ${
+                                isCopied
+                                  ? 'border-[#722F37] bg-[#722F37] text-white'
+                                  : 'border-[#F3D5DB] bg-[#FAF7F8] text-[#6E5A5E] hover:bg-[#FDF2F4] hover:text-[#722F37]'
+                              }`}
+                            >
+                              {isCopied ? (
+                                <>
+                                  <Check className="h-3 w-3" />
+                                  <span>¡Copiado!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copiar respuesta</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
 
                         <div className="space-y-1">{renderFormattedText(msg.content)}</div>
 
-                        {/* Tarjeta interactiva de Escalamiento */}
+                        {/* Tarjeta interactiva de Escalamiento -> POST /api/tickets */}
                         {msg.escalada && (
                           <div className="mt-3.5 rounded-xl border border-[#722F37]/30 bg-[#FDF2F4] p-3.5 text-xs">
                             <div className="flex items-start gap-2.5">
@@ -502,23 +756,33 @@ export default function ChatPage() {
                                   Consulta sin respaldo en políticas vigentes
                                 </p>
                                 <p className="mt-0.5 text-[#6E5A5E]">
-                                  Puedes confirmar el escalamiento para que un especialista de
-                                  Talento Humano atienda tu caso directamente.
+                                  Puedes abrir un ticket formal para que un especialista de Talento
+                                  Humano atienda y responda tu consulta en el portal.
                                 </p>
 
                                 <button
                                   type="button"
-                                  disabled={isConfirmed}
-                                  onClick={() => handleConfirmEscalation(msg.id)}
+                                  disabled={Boolean(createdTicketCode) || isCreatingTicket}
+                                  onClick={() => handleCreateTicket(msg)}
                                   className={`mt-2.5 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                                    isConfirmed
+                                    createdTicketCode
                                       ? 'border border-[#F3D5DB] bg-white text-[#722F37] cursor-default'
-                                      : 'bg-[#722F37] text-white hover:bg-[#5A2229] cursor-pointer'
+                                      : 'bg-[#722F37] text-white hover:bg-[#5A2229] cursor-pointer disabled:opacity-60'
                                   }`}
                                 >
-                                  {isConfirmed
-                                    ? 'Solicitud enviada a RRHH ✓'
-                                    : 'Confirmar envío de consulta a Talento Humano'}
+                                  {isCreatingTicket ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      <span>Creando ticket...</span>
+                                    </>
+                                  ) : createdTicketCode ? (
+                                    <>
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-[#722F37]" />
+                                      <span>Ticket #{createdTicketCode} creado ✓</span>
+                                    </>
+                                  ) : (
+                                    <span>Confirmar envío de consulta a Talento Humano</span>
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -579,6 +843,12 @@ export default function ChatPage() {
                                 <strong className="text-[#4E1A21]">{msg.intencion}</strong>
                               </span>
                             )}
+                            {msg.validado && (
+                              <span className="inline-flex items-center gap-1 rounded-md border border-[#F3D5DB] bg-[#FDF2F4] px-2 py-0.5 font-semibold text-[#722F37]">
+                                <ShieldCheck className="h-3 w-3" />
+                                Validado
+                              </span>
+                            )}
                             {msg.latencia_ms !== null && msg.latencia_ms !== undefined && (
                               <span className="inline-flex items-center gap-1 rounded-md border border-[#F3D5DB] bg-[#FAF7F8] px-2 py-0.5">
                                 <Clock className="h-3 w-3 text-[#9E3344]" />
@@ -598,7 +868,7 @@ export default function ChatPage() {
               <div className="flex justify-start">
                 <div className="flex items-center gap-2.5 rounded-2xl border border-[#F3D5DB] bg-white px-4 py-3 text-xs font-medium text-[#4E1A21] shadow-sm">
                   <Loader2 className="h-4 w-4 animate-spin text-[#722F37]" />
-                  <span>Consultando agentes de Talento Humano...</span>
+                  <span>Consultando y validando respuesta con agentes de Talento Humano...</span>
                 </div>
               </div>
             )}
@@ -610,20 +880,36 @@ export default function ChatPage() {
             onSubmit={handleSubmit}
             className="rounded-b-2xl border-t border-[#F3D5DB] bg-white p-3 sm:p-4"
           >
-            <div className="flex items-end gap-2.5">
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={handleToggleVoiceInput}
+                disabled={sending}
+                title={listening ? 'Detener dictado por voz' : 'Hablar consulta por micrófono'}
+                aria-label="Dictar consulta por voz"
+                className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition cursor-pointer ${
+                  listening
+                    ? 'animate-pulse border-[#722F37] bg-[#722F37] text-white ring-4 ring-[#722F37]/20'
+                    : 'border-[#F3D5DB] bg-[#FAF7F8] text-[#722F37] hover:border-[#722F37] hover:bg-[#FDF2F4]'
+                }`}
+              >
+                {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </button>
+
               <textarea
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={sending}
-                placeholder="Escribe tu consulta (Enter para enviar, Shift+Enter para nueva línea)..."
+                placeholder="Escribe o dicta tu consulta (Enter para enviar, Shift+Enter para nueva línea)..."
                 className="max-h-32 flex-1 resize-none rounded-xl border border-[#F3D5DB] bg-[#FAF7F8] px-4 py-2.5 text-sm text-[#1F1416] placeholder-[#6E5A5E]/70 outline-none transition focus:border-[#722F37] focus:bg-white focus:ring-2 focus:ring-[#722F37]/15 disabled:opacity-60"
               />
+
               <button
                 type="submit"
                 disabled={sending || !input.trim()}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#722F37] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#5A2229] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#722F37] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#5A2229] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
               >
                 <Send className="h-4 w-4" />
                 <span className="hidden sm:inline">Enviar</span>

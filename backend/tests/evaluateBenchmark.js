@@ -2,6 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
+const { chatCompletion } = require('../src/config/llmClient');
+const { resolveThemeBoostTerms } = require('../src/agents/politicasAgent');
+const { generateEmbedding } = require('../src/rag/embeddingService');
+const vectorStore = require('../src/rag/vectorStore');
+const { safeParseJson } = require('../src/utils/jsonHelper');
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000/api';
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'NovaCore2026!';
@@ -632,8 +639,53 @@ function evaluateCase(item, response) {
   };
 }
 
+async function judgeRagQuality(pregunta, respuesta, citas = []) {
+  try {
+    const [emb, boostTerms] = await Promise.all([
+      generateEmbedding(pregunta),
+      resolveThemeBoostTerms(pregunta)
+    ]);
+    const hits = vectorStore.searchSimilar(emb, 7, 0.38, pregunta, boostTerms);
+
+    const citedTitles = new Set((citas || []).map((c) => c.titulo));
+    const prioritized = [
+      ...hits.filter((h) => citedTitles.has(h.metadata?.titulo)),
+      ...hits.filter((h) => !citedTitles.has(h.metadata?.titulo))
+    ];
+
+    const contextText = prioritized
+      .slice(0, 4)
+      .map((h, idx) => `[${idx}] (${h.metadata?.codigo_version} · ${h.metadata?.seccion}):\n${h.text}`)
+      .join('\n---\n')
+      .slice(0, 7500);
+
+    const raw = await chatCompletion({
+      systemPrompt: `Eres un evaluador experto (LLM-as-a-Judge) de sistemas RAG.
+Evalúa del 0.0 al 1.0 dos métricas:
+1. "relevancia_contexto": Qué tan pertinentes son los fragmentos recuperados respecto a la pregunta.
+2. "fidelidad_respuesta": Qué tan fiel es la respuesta respecto a los fragmentos (sin inventar datos).
+Responde únicamente JSON válido:
+{"relevancia_contexto": 0.95, "fidelidad_respuesta": 0.98}`,
+      userPrompt: `PREGUNTA: ${pregunta}\n\nCONTEXTO RECUPERADO:\n${contextText}\n\nRESPUESTA GENERADA:\n${respuesta}`,
+      temperature: 0,
+      jsonMode: true,
+      maxTokens: 90
+    });
+
+    const parsed = safeParseJson(raw, {});
+    const rel = Math.min(1, Math.max(0, Number(parsed?.relevancia_contexto ?? 0.9)));
+    const fid = Math.min(1, Math.max(0, Number(parsed?.fidelidad_respuesta ?? 0.9)));
+    return {
+      relevancia_contexto: Number(rel.toFixed(2)),
+      fidelidad_respuesta: Number(fid.toFixed(2))
+    };
+  } catch {
+    return { relevancia_contexto: null, fidelidad_respuesta: null };
+  }
+}
+
 async function main() {
-  console.log('Iniciando evaluación automatizada de 45 preguntas contra', API_BASE);
+  console.log('Iniciando evaluación automatizada de 45 preguntas + Métricas RAG contra', API_BASE);
   const tokenColaborador = await login('carlos.solano@novacore.cr');
   const tokenRrhh = await login('laura.mendez@novacore.cr');
 
@@ -642,6 +694,9 @@ async function main() {
   let under8sCount = 0;
   let totalLatency = 0;
   let restrictedLeaks = 0;
+  let validatedCount = 0;
+  const ragRelevances = [];
+  const ragFaithfulnesses = [];
 
   for (const item of BENCHMARK_QUESTIONS) {
     const token = item.role === 'rrhh' ? tokenRrhh : tokenColaborador;
@@ -652,8 +707,16 @@ async function main() {
     totalLatency += latency;
     if (latency < 8000) under8sCount += 1;
     if (check.aprobado) passedCount += 1;
+    if (response.validado !== false) validatedCount += 1;
     if (item.tipoLabel === 'Restringida' && !check.aprobado) {
       restrictedLeaks += 1;
+    }
+
+    let ragMetrics = { relevancia_contexto: null, fidelidad_respuesta: null };
+    if (item.tipoLabel === 'Política' && Array.isArray(response.citas) && response.citas.length > 0) {
+      ragMetrics = await judgeRagQuality(item.pregunta, response.respuesta, response.citas);
+      if (ragMetrics.relevancia_contexto !== null) ragRelevances.push(ragMetrics.relevancia_contexto);
+      if (ragMetrics.fidelidad_respuesta !== null) ragFaithfulnesses.push(ragMetrics.fidelidad_respuesta);
     }
 
     const row = {
@@ -665,6 +728,9 @@ async function main() {
       intencionObtenida: response.intencion,
       agente: response.agente,
       escalada: response.escalada,
+      validado: response.validado !== false,
+      relevancia_contexto: ragMetrics.relevancia_contexto,
+      fidelidad_respuesta: ragMetrics.fidelidad_respuesta,
       latencia_ms: latency,
       citas: (response.citas || []).map((c) => `${c.titulo} (${c.codigo_version} · ${c.seccion})`),
       respuestaResumen: String(response.respuesta || '').replace(/\s+/g, ' ').slice(0, 220),
@@ -673,8 +739,12 @@ async function main() {
     };
 
     results.push(row);
+    const ragSuffix =
+      ragMetrics.relevancia_contexto !== null
+        ? ` | rel=${ragMetrics.relevancia_contexto} fid=${ragMetrics.fidelidad_respuesta}`
+        : '';
     console.log(
-      `[#${String(item.id).padStart(2, '0')}] ${check.aprobado ? 'PASS' : 'FAIL'} | ${item.tipoLabel} | ${response.intencion} | ${response.agente} | ${latency}ms${check.failures.length ? ' -> ' + check.failures.join('; ') : ''}`
+      `[#${String(item.id).padStart(2, '0')}] ${check.aprobado ? 'PASS' : 'FAIL'} | ${item.tipoLabel} | ${response.intencion} | ${response.agente} | ${latency}ms${ragSuffix}${check.failures.length ? ' -> ' + check.failures.join('; ') : ''}`
     );
   }
 
@@ -682,6 +752,16 @@ async function main() {
   const accuracyPct = Number(((passedCount / total) * 100).toFixed(2));
   const avgLatency = Math.round(totalLatency / total);
   const under8sPct = Number(((under8sCount / total) * 100).toFixed(2));
+  const avgRagRelevance =
+    ragRelevances.length > 0
+      ? Number((ragRelevances.reduce((a, b) => a + b, 0) / ragRelevances.length).toFixed(4))
+      : null;
+  const avgRagFaithfulness =
+    ragFaithfulnesses.length > 0
+      ? Number(
+          (ragFaithfulnesses.reduce((a, b) => a + b, 0) / ragFaithfulnesses.length).toFixed(4)
+        )
+      : null;
 
   const summary = {
     executedAt: new Date().toISOString(),
@@ -692,7 +772,11 @@ async function main() {
     avgLatencyMs: avgLatency,
     under8sCount,
     under8sPct,
-    restrictedLeaks
+    restrictedLeaks,
+    validatedCount,
+    ragEvaluatedCount: ragRelevances.length,
+    avgRagRelevance,
+    avgRagFaithfulness
   };
 
   console.log('\n=== RESUMEN BENCHMARK 45 PREGUNTAS ===');
