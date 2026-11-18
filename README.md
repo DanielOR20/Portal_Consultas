@@ -2,13 +2,13 @@
 
 Plataforma interna de Recursos Humanos diseñada para **NovaCore Technologies Costa Rica S.A.** (empresa ficticia de desarrollo de software y servicios B2B con 250 colaboradores), construida bajo la legislación laboral vigente de la **República de Costa Rica** (Código de Trabajo Ley N.° 2, Ley N.° 7983, Ley N.° 10211, Ley N.° 7476, Ley N.° 8968, Ley N.° 9738 y reglamentos de CCSS e INS).
 
-El sistema combina **orquestación de 7 agentes especializados** (Orquestador, Políticas RAG, Datos Personales, Validador, Escalamiento, Ingesta y Analista), **RAG** conectado a **Google Drive API**, **9 tablas en MySQL** gestionadas 100 % con **Sequelize ORM (cero SQL crudo)**, control estricto de acceso por roles (**RBAC**: `colaborador` vs `rrhh`) y un **Dashboard Analítico y de Tickets** en diseño **Vino y Blanco** con interacción por voz.
+El sistema combina **orquestación de 7 agentes especializados** (Orquestador, Políticas RAG, Datos Personales, Validador, Escalamiento, Ingesta y Analista), **RAG** conectado a **Google Drive API**, **9 tablas en MySQL** gestionadas 100 % con **Sequelize ORM (cero SQL crudo)**, control estricto de acceso por roles (**RBAC**: `colaborador` vs `rrhh`) y un **Dashboard Analítico y de Tickets** en diseño **Vino Fosforescente y Blanco** con interacción por voz y gestor CRUD de palabras clave.
 
 ---
 
 ## Tecnologías Principales
 
-- **Frontend:** React 18, Vite 6, Tailwind CSS v4 (paleta corporativa Vino y Blanco), React Router, Axios, Chart.js (`react-chartjs-2`), Lucide Icons, Web Speech API (reconocimiento y síntesis de voz en `es-CR`)
+- **Frontend:** React 18, Vite 6, Tailwind CSS v4 (paleta corporativa **Vino Fosforescente `#E6004C` y Blanco Puro `#FFFFFF`**), React Router, Axios, Chart.js (`react-chartjs-2`), Lucide Icons, Web Speech API (reconocimiento y síntesis de voz en `es-CR`)
 - **Backend:** Node.js (CommonJS), Express, Sequelize ORM (9 tablas, **100 % sin SQL crudo**), MySQL (`mysql2`), JWT (`jsonwebtoken`), `bcryptjs`, `zod`, `node-cron`
 - **IA, RAG y Documentos:**
   - **LLM:** DeepSeek API (`deepseek-chat` vía SDK oficial `openai`)

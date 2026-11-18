@@ -5,7 +5,7 @@
 | **Proyecto** | Portal Interno de Consulta de Políticas de RRHH con RAG Multiagente (`Portal_Consultas`) |
 | **Organización Modelo** | NovaCore Technologies Costa Rica S.A. (250 colaboradores · Sector Software B2B) |
 | **Marco Normativo** | Legislación Laboral de la República de Costa Rica (Código de Trabajo Ley N.° 2 y leyes conexas) |
-| **Versión / Fecha** | `v1.2` · 17 de noviembre de 2026 |
+| **Versión / Fecha** | `v1.3` · 18 de noviembre de 2026 |
 | **Repositorio Oficial** | `https://github.com/DanielOR20/Portal_Consultas.git` |
 
 ---
@@ -21,7 +21,7 @@ El **Portal Interno de Consulta de Políticas de RRHH con RAG Multiagente** resu
 
 La arquitectura divide el sistema en dos planos independientes (detallados en [diagrama_arquitectura.md](../architecture/diagrama_arquitectura.md)):
 
-- **Plano Síncrono (Tiempo Real):** Aplicación SPA en React + Vite (tema **Vino y Blanco**, con dictado y lectura por voz mediante Web Speech API) comunicada vía REST/JWT con Express. El **Agente Orquestador** clasifica cada consulta apoyado en la tabla dinámica `palabras_clave`, la enruta hacia el **Agente de Políticas RAG**, el **Agente de Datos del Colaborador** o ambos en paralelo (`Promise.all`), y somete la salida al **Agente Validador** (privacidad ORM + fidelidad LLM) antes de devolverla y registrarla en `consultas_chat`. Cuando no existe respaldo documental, el **Agente de Escalamiento** permite crear tickets reales en `tickets_rrhh`.
+- **Plano Síncrono (Tiempo Real):** Aplicación SPA en React + Vite (tema **Vino Fosforescente y Blanco Puro**, con dictado y lectura por voz mediante Web Speech API) comunicada vía REST/JWT con Express. El **Agente Orquestador** clasifica cada consulta apoyado en la tabla dinámica `palabras_clave`, la enruta hacia el **Agente de Políticas RAG**, el **Agente de Datos del Colaborador** o ambos en paralelo (`Promise.all`), y somete la salida al **Agente Validador** (privacidad ORM + fidelidad LLM) antes de devolverla y registrarla en `consultas_chat`. Cuando no existe respaldo documental, el **Agente de Escalamiento** permite crear tickets reales en `tickets_rrhh`.
 - **Plano Asíncrono / Programado (`node-cron`):**
   - **06:30 a.m. (`driveSyncJob.js`):** El **Agente de Ingesta** consulta Google Drive API v3 (`drive.changes` y listado de carpeta) para detectar altas, modificaciones y eliminaciones de documentos en Docs, Sheets y PDF, regenerando *chunks* y *embeddings* únicamente cuando existen cambios.
   - **07:00 a.m. (`dailyReportJob.js`):** El **Agente Analista** calcula determinísticamente en SQL/Sequelize los 8 KPIs diarios, solicita a DeepSeek un resumen ejecutivo de 3 a 5 frases basado exclusivamente en el JSON calculado y guarda el reporte en `reportes_diarios`.
@@ -38,7 +38,7 @@ La arquitectura divide el sistema en dos planos independientes (detallados en [d
 | **Modelo de Lenguaje (LLM)** | DeepSeek API (`deepseek-chat`) vía SDK `openai` | Excelente relación costo/latencia y soporte nativo de `response_format: { type: 'json_object' }`, indispensable para clasificación determinista de intenciones (`T=0`) y respuestas estructuradas con verificación de cobertura documental (`T=0.1`). |
 | **Embeddings Multilingües** | `@xenova/transformers` (`Xenova/paraphrase-multilingual-MiniLM-L12-v2`) | DeepSeek no provee API de embeddings; este modelo ONNX local de 384 dimensiones optimizado para texto multilingüe (incluyendo español) opera sin dependencias externas en la nube, sin costo por token de indexación y con latencia ~30–50 ms por consulta tras su carga inicial. |
 | **Almacenamiento Vectorial** | Vector Store JSON persistente (`backend/vector_store/vectors.json`) | Para una base normativa corporativa de 10 documentos oficiales (~31 fragmentos vectorizados de 384 dimensiones), un almacén persistente en memoria + disco con búsqueda híbrida (coseno + refuerzo léxico) ofrece latencia sub-milisegundo sin requerir levantar un contenedor Docker adicional para ChromaDB en desarrollo local, manteniendo compatibilidad arquitectónica con una futura migración a base vectorial distribuida. |
-| **Frontend & Visualización** | React 18 + Vite 6 + Tailwind CSS v4 + Chart.js | Compilación rápida (`5.25s`), sistema de diseño corporativo luminoso en **Vino y Blanco** (`#722F37`, `#4E1A21`, `#FDF2F4`, `#FFFFFF`, `#FAF7F8`), interacción por voz (`SpeechRecognition` + `speechSynthesis`), notificaciones Toast, tickets en vivo en `/chat` y `/dashboard`, gestor visual CRUD de `palabras_clave`, exportación de reportes CSV/JSON y gráficos interactivos (`Line`, `Bar`, `Doughnut`). |
+| **Frontend & Visualización** | React 18 + Vite 6 + Tailwind CSS v4 + Chart.js | Compilación rápida (`5.87s`), sistema de diseño corporativo luminoso en **Vino Fosforescente y Blanco Puro** (`#E6004C`, `#FF1764`, `#FFF0F5`, `#FFFFFF`, `#F8F9FB`), interacción por voz (`SpeechRecognition` + `speechSynthesis`), notificaciones Toast, tickets en vivo en `/chat` y `/dashboard` (3 pestañas y modal de resolución), gestor visual CRUD de `palabras_clave`, exportación de reportes CSV/JSON y gráficos interactivos (`Line`, `Bar`, `Doughnut`). |
 
 ---
 
@@ -92,7 +92,7 @@ En todos los casos se normalizan saltos de línea y se extraen automáticamente 
 
 - **Chunking (`chunker.js`):** Divide cada documento en fragmentos de **~2,400–2,600 caracteres** (~600–800 tokens) con **~450 caracteres de solapamiento** (~120 tokens), sin cortar palabras y detectando tanto encabezados Markdown (`##` / `###`) como encabezados numerados de Google Docs/PDF (`3.1 ...`) para registrar la `seccion` exacta en los metadatos de cada chunk. Los 10 documentos generan **31 chunks** persistentes.
 - **Hallazgo y solución técnica en `embeddingService.js`:** Durante las pruebas iniciales se observó que pasar un fragmento de ~2,500 caracteres en una sola llamada a `Xenova/paraphrase-multilingual-MiniLM-L12-v2` degradaba severamente la similitud coseno (`0.02–0.19`) debido a la ventana efectiva de contexto del modelo. Se implementó segmentación interna por **sub-ventanas deslizantes de 450 caracteres** (solapamiento de 100 caracteres) con promedio L2-normalizado de los vectores resultantes, elevando las coincidencias válidas a **`0.55–0.68`**.
-- **Búsqueda Híbrida (`vectorStore.js` + `politicasAgent.js`):** Para evitar que encabezados corporativos repetidos desplazaran secciones específicas en consultas puntuales, `politicasAgent.js` resuelve dinámicamente términos relacionados por `tema_asociado` desde la tabla `palabras_clave` en MySQL (cero listas hardcodeadas en JS) y `searchSimilar` combina similitud coseno con refuerzo léxico normalizado. Este enfoque logró **0.95** de relevancia de contexto y **0.9938** de fidelidad RAG.
+- **Búsqueda Híbrida (`vectorStore.js` + `politicasAgent.js`):** Para evitar que encabezados corporativos repetidos desplazaran secciones específicas en consultas puntuales, `politicasAgent.js` resuelve dinámicamente términos relacionados por `tema_asociado` desde la tabla `palabras_clave` en MySQL (cero listas hardcodeadas en JS) y `searchSimilar` combina similitud coseno con refuerzo léxico normalizado. Este enfoque logró **0.9542** de relevancia de contexto y **0.9938** de fidelidad RAG.
 
 ---
 
@@ -105,12 +105,12 @@ El script automatizado [evaluateBenchmark.js](../../backend/tests/evaluateBenchm
 | Métrica | Valor Medido |
 | :--- | :--- |
 | **Total de preguntas ejecutadas** | **45** |
-| **Preguntas aprobadas** | **44 / 45 (97.78 %)** *(meta ≥ 80 %)* |
-| **Preguntas con observación parcial** | **1** (`#7`: citó `PRO-RRHH-03` con `rel=0.7 / fid=0.95`, omitió expresar `100 %` / `40 %` en esa redacción puntual) |
-| **Latencia promedio global (incluyendo `validadorAgent`)** | **4,123 ms** (~4.12 s) |
-| **Respuestas < 8,000 ms** | **43 / 45 (95.56 %)** *(meta ≥ 90 %; solo #19 con 8,299 ms y #37 con 8,216 ms)* |
+| **Preguntas aprobadas** | **43 / 45 (95.56 %)** *(meta ≥ 95 %)* |
+| **Preguntas con observación parcial** | **2** (`#2`: respondió `Días disponibles: 11.00` sin la palabra `días`; `#7`: citó `PRO-RRHH-03` con `rel=0.85 / fid=0.95`, omitiendo expresar `100 %` / `40 %`) |
+| **Latencia promedio global (incluyendo `validadorAgent`)** | **4,467 ms** (~4.47 s) |
+| **Respuestas < 8,000 ms** | **43 / 45 (95.56 %)** *(meta ≥ 90 %; solo #19 con 8,785 ms y #37 con 8,242 ms)* |
 | **Respuestas auditadas por `validadorAgent`** | **45 / 45 (100 %)** |
-| **Relevancia de Contexto RAG (LLM-as-a-Judge, 24 políticas)** | **0.95 / 1.00** |
+| **Relevancia de Contexto RAG (LLM-as-a-Judge, 24 políticas)** | **0.9542 / 1.00** |
 | **Fidelidad de Respuesta RAG (LLM-as-a-Judge, 24 políticas)** | **0.9938 / 1.00** |
 | **Fugas de privacidad (#21, #22, #39, #40)** | **0 fugas (100 % rechazo seguro)** |
 | **Escalamiento sin alucinación (#23, #41, #42)** | **3 / 3 (`escalada: true`, 0 citas inventadas)** |
@@ -120,13 +120,13 @@ El script automatizado [evaluateBenchmark.js](../../backend/tests/evaluateBenchm
 
 | Categoría | Cantidad | Aciertos | Latencia Promedio |
 | :--- | :---: | :---: | :---: |
-| **Política (RAG Drive + Validador)** | 24 | 23 / 24 (95.83 %) | ~4,715 ms |
-| **Dato personal (MySQL ORM + Validador)** | 6 | 6 / 6 (100 %) | ~3,948 ms |
-| **Mixta (MySQL + RAG + Validador)** | 3 | 3 / 3 (100 %) | ~8,049 ms |
-| **Dato agregado RRHH (`rol: rrhh`)** | 3 | 3 / 3 (100 %) | ~4,553 ms |
-| **Restringida (Guardrail Ley 8968 + BD)** | 4 | 4 / 4 (100 %) | ~731 ms |
-| **Sin respuesta (Escalamiento RRHH)** | 3 | 3 / 3 (100 %) | ~2,644 ms |
-| **Fuera de alcance (Guardrail + BD)** | 2 | 2 / 2 (100 %) | ~0 ms |
+| **Política (RAG Drive + Validador)** | 24 | 23 / 24 (95.83 %) | ~5,142 ms |
+| **Dato personal (MySQL ORM + Validador)** | 6 | 5 / 6 (83.33 %) | ~4,615 ms |
+| **Mixta (MySQL + RAG + Validador)** | 3 | 3 / 3 (100 %) | ~8,313 ms |
+| **Dato agregado RRHH (`rol: rrhh`)** | 3 | 3 / 3 (100 %) | ~4,606 ms |
+| **Restringida (Guardrail Ley 8968 + BD)** | 4 | 4 / 4 (100 %) | ~585 ms |
+| **Sin respuesta (Escalamiento RRHH)** | 3 | 3 / 3 (100 %) | ~2,935 ms |
+| **Fuera de alcance (Guardrail + BD)** | 2 | 2 / 2 (100 %) | ~1 ms |
 
 ---
 

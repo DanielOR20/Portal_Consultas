@@ -12,26 +12,26 @@ export default function Navbar() {
   };
 
   const navLinkClass = ({ isActive }) =>
-    `flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-all ${
+    `flex items-center gap-2 rounded-full px-4 py-1.5 text-xs sm:text-sm font-medium transition-all ${
       isActive
-        ? 'bg-white text-[#4E1A21] shadow-sm font-semibold'
-        : 'text-white/85 hover:bg-white/15 hover:text-white'
+        ? 'bg-white text-[#E6004C] font-semibold shadow-sm'
+        : 'bg-white/15 text-white/95 backdrop-blur-sm hover:bg-white/25 hover:text-white'
     }`;
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[#722F37] bg-[#4E1A21] text-white shadow-sm">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-6">
+    <header className="sticky top-0 z-30 h-16 shrink-0 bg-gradient-to-r from-[#D9044B] via-[#E6004C] to-[#FF1764] text-white shadow-[0_2px_18px_rgba(230,0,76,0.28)]">
+      <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="flex items-center gap-5">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/25 bg-[#722F37] text-white shadow-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/15 text-white backdrop-blur-sm">
               <ShieldCheck className="h-5 w-5" />
             </div>
-            <div>
-              <span className="block text-sm font-bold tracking-wide text-white">
+            <div className="hidden sm:block">
+              <span className="block text-sm font-bold tracking-wide text-white leading-tight">
                 NovaCore Talento Humano
               </span>
-              <span className="block text-[11px] text-rose-100/80">
-                Portal Interno de Consultas RRHH
+              <span className="block text-[11px] text-white/85 leading-tight">
+                Portal RRHH Multiagente
               </span>
             </div>
           </div>
@@ -51,26 +51,25 @@ export default function Navbar() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="hidden items-center gap-2.5 rounded-lg border border-white/20 bg-[#722F37]/70 px-3 py-1.5 sm:flex">
-            <User className="h-4 w-4 text-rose-100" />
-            <div className="text-left">
-              <p className="text-xs font-semibold text-white leading-tight">{user?.nombre}</p>
-              <p className="text-[11px] text-rose-100/85 leading-tight">
-                {user?.departamento} ·{' '}
-                <span className="ml-0.5 inline-block rounded bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#4E1A21]">
-                  {user?.rol}
-                </span>
-              </p>
+        <div className="flex items-center gap-2.5">
+          <div className="hidden items-center gap-2.5 rounded-full border border-white/25 bg-white/15 px-3 py-1 backdrop-blur-sm md:flex">
+            <User className="h-3.5 w-3.5 text-white" />
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-white">{user?.nombre}</span>
+              <span className="text-white/75">·</span>
+              <span className="text-[11px] text-white/90">{user?.departamento}</span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase text-[#E6004C]">
+                {user?.rol}
+              </span>
             </div>
           </div>
 
           <button
             type="button"
             onClick={handleLogout}
-            className="flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-xs font-medium text-white transition hover:bg-white hover:text-[#4E1A21] cursor-pointer"
+            className="flex items-center gap-1.5 rounded-full border border-white/30 bg-white/15 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur-sm transition hover:bg-white hover:text-[#E6004C] cursor-pointer"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Cerrar sesión</span>
           </button>
         </div>

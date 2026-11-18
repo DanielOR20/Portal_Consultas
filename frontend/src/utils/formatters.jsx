@@ -38,7 +38,7 @@ export function renderFormattedText(text) {
     return parts.map((part, idx) => {
       if (part.startsWith('**') && part.endsWith('**')) {
         return (
-          <strong key={idx} className="font-semibold text-[#4E1A21]">
+          <strong key={idx} className="font-semibold text-[#18181B]">
             {part.slice(2, -2)}
           </strong>
         );
@@ -56,7 +56,7 @@ export function renderFormattedText(text) {
     if (/^#{1,3}\s+/.test(trimmed)) {
       const heading = trimmed.replace(/^#{1,3}\s+/, '');
       return (
-        <p key={index} className="mt-2.5 mb-1 text-sm font-bold text-[#722F37]">
+        <p key={index} className="mt-2.5 mb-1 text-sm font-bold text-[#E6004C]">
           {renderInlineBold(heading)}
         </p>
       );
@@ -67,9 +67,9 @@ export function renderFormattedText(text) {
       return (
         <div
           key={index}
-          className="flex items-start gap-2 pl-1 text-sm leading-relaxed text-[#1F1416]"
+          className="flex items-start gap-2 pl-1 text-sm leading-relaxed text-[#18181B]"
         >
-          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#9E3344]" />
+          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#E6004C]" />
           <span>{renderInlineBold(itemText)}</span>
         </div>
       );
@@ -77,14 +77,14 @@ export function renderFormattedText(text) {
 
     if (/^\d+\.\s+/.test(trimmed)) {
       return (
-        <p key={index} className="pl-1 text-sm leading-relaxed text-[#1F1416]">
+        <p key={index} className="pl-1 text-sm leading-relaxed text-[#18181B]">
           {renderInlineBold(trimmed)}
         </p>
       );
     }
 
     return (
-      <p key={index} className="text-sm leading-relaxed text-[#1F1416]">
+      <p key={index} className="text-sm leading-relaxed text-[#18181B]">
         {renderInlineBold(rawLine)}
       </p>
     );

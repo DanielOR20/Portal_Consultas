@@ -13,7 +13,16 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin(origin, callback) {
+      if (
+        !origin ||
+        (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) ||
+        /^http:\/\/localhost:\d+$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origen no permitido por CORS: ${origin}`));
+    },
     credentials: true
   })
 );

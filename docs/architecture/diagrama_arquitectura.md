@@ -4,8 +4,8 @@
 | :--- | :--- |
 | **Proyecto** | Portal Interno de Consulta de Políticas de RRHH con RAG Multiagente |
 | **Empresa Modelo** | NovaCore Technologies Costa Rica S.A. |
-| **Versión** | `v1.2` (9 tablas MySQL · 7 Agentes · 100 % Sequelize ORM · UI Vino & Blanco) |
-| **Fecha** | 17 de noviembre de 2026 |
+| **Versión** | `v1.3` (9 tablas MySQL · 7 Agentes · 100 % Sequelize ORM · UI Vino Fosforescente & Blanco) |
+| **Fecha** | 18 de noviembre de 2026 |
 
 ---
 
@@ -19,7 +19,7 @@ La arquitectura del portal separa estrictamente la **ruta interactiva en tiempo 
 
 ```mermaid
 flowchart TD
-    U["Usuario (Colaborador / RRHH)<br/>React + Vite (Vino & Blanco)<br/>Web Speech API (Voz STT / TTS)"] -->|"HTTPS / JSON + Bearer JWT"| API["API Gateway Express<br/>authMiddleware + roleMiddleware"]
+    U["Usuario (Colaborador / RRHH)<br/>React + Vite (Vino Fosforescente & Blanco)<br/>Web Speech API (Voz STT / TTS)"] -->|"HTTPS / JSON + Bearer JWT"| API["API Gateway Express<br/>authMiddleware + roleMiddleware"]
     API -->|"POST /api/chat<br/>{ pregunta, historial }"| ORQ["1. Agente Orquestador<br/>(orquestadorAgent.js)<br/>DeepSeek jsonMode · T=0"]
 
     KW[("MySQL · Tabla palabras_clave<br/>Sequelize ORM + caché 60 s<br/>(CRUD + invalidación inmediata)")] -->|"restringida / fuera_alcance /<br/>politica / dato_personal"| ORQ
@@ -71,7 +71,7 @@ flowchart LR
         ANA -->|"Consultas Sequelize ORM deterministas<br/>+ palabras_clave (tema_dashboard)"| DB[("MySQL portal_rrhh_db<br/>9 tablas · Sequelize ORM")]
         DB -->|"datos_json (8 indicadores)"| LLM["DeepSeek API (T=0.2)<br/>Resumen Ejecutivo 3-5 frases"]
         LLM -->|"Upsert diario (ORM)"| REP[("Tabla reportes_diarios<br/>fecha única + datos_json + resumen")]
-        REP -->|"GET /api/dashboard/latest & history<br/>+ Export CSV/JSON"| DASH["Dashboard RRHH (Vino & Blanco)<br/>KPIs + Chart.js + Bandeja Tickets<br/>+ Gestor CRUD palabras_clave"]
+        REP -->|"GET /api/dashboard/latest & history<br/>+ Export CSV/JSON"| DASH["Dashboard RRHH (Vino Fosforescente)<br/>KPIs + Chart.js + 3 Pestañas:<br/>Solicitudes, Tickets y CRUD palabras_clave"]
         DB -->|"/api/tickets + /api/dashboard/keywords"| DASH
     end
 ```
@@ -80,7 +80,7 @@ flowchart LR
 
 ## 4. Descripción por Capas y Control de Acceso (RBAC)
 
-1. **Capa de Presentación (`frontend/`):** SPA React + Vite en estética corporativa **Vino y Blanco** (`#722F37`, `#4E1A21`, `#FDF2F4`, `#FFFFFF`, `#FAF7F8`), con dictado/lectura por voz (Web Speech API), notificaciones Toast, tarjetas de tickets en tiempo real, gestor visual CRUD de `palabras_clave` y exportación CSV/JSON.
+1. **Capa de Presentación (`frontend/`):** SPA React + Vite en estética corporativa **Vino Fosforescente y Blanco Puro** (`#E6004C`, `#FF1764`, `#FFF0F5`, `#FFFFFF`, `#F8F9FB`), con dictado/lectura por voz (Web Speech API), notificaciones Toast, tickets en vivo en `/chat` y `/dashboard`, panel inferior organizado en 3 pestañas con gestor visual CRUD de `palabras_clave` y exportación CSV/JSON.
 2. **Capa API y Seguridad (`backend/src/routes`, `middlewares`, `controllers`):** Express con validación `zod`, hashing `bcryptjs`, JWT (`authMiddleware.js`) y RBAC (`roleMiddleware.js`).
    - Públicas: `GET /api/health`, `POST /api/auth/login`.
    - Autenticadas: `GET /api/auth/me`, `POST /api/chat`, `GET /api/chat/history`, `GET /api/ingest/status`, `POST /api/tickets`, `GET /api/tickets/mine`.

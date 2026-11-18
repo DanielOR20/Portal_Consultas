@@ -7,10 +7,12 @@ export default function ProtectedRoute({ children, requiredRole = null }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAF7F8] text-[#1F1416]">
-        <div className="flex items-center gap-3 rounded-xl border border-[#F3D5DB] bg-white px-6 py-4 shadow-sm">
-          <Loader2 className="h-5 w-5 animate-spin text-[#722F37]" />
-          <span className="text-sm font-medium">Verificando sesión de colaborador...</span>
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F9FB] text-[#18181B]">
+        <div className="flex items-center gap-3 rounded-2xl border border-[#FFB8D0] bg-white px-6 py-4 shadow-sm">
+          <Loader2 className="h-5 w-5 animate-spin text-[#E6004C]" />
+          <span className="text-sm font-medium text-[#18181B]">
+            Verificando sesión de colaborador...
+          </span>
         </div>
       </div>
     );
