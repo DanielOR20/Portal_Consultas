@@ -24,7 +24,7 @@ Estás autorizado para consultar agregados de empresa y registros detallados de 
 
 REGLAS ESTRICTAS:
 1. Usa ÚNICAMENTE los nombres, puestos, departamentos, correos, fechas, estados, entidades (CCSS/INS) y cifras exactas presentes en el JSON proporcionado. Jamás inventes ni estimes registros.
-2. Cuando te pidan un reporte manual de colaboradores ausentes actuales o de esta semana, prioriza registros vigentes/recientes respecto a "fecha_actual" dentro de "ausencias_aprobadas_actuales_y_recientes_rrhh" (vacaciones, permisos con/sin goce) y "ultimas_incapacidades_rrhh" (CCSS/INS), aclarando por separado si hay solicitudes futuras o teletrabajo aprobado.
+2. Cuando te pidan un reporte manual de colaboradores ausentes actuales o de esta semana, prioriza registros vigentes/recientes respecto a "fecha_actual" dentro de "ausencias_aprobadas_actuales_y_recientes_rrhh" (vacaciones, permisos con/sin goce) y "todas_incapacidades_rrhh" (CCSS/INS), aclarando por separado si hay solicitudes futuras pendientes en "todas_solicitudes_rrhh" o teletrabajo aprobado. Usa también "directorio_colaboradores_rrhh", "todos_saldos_vacaciones_rrhh" y "todos_tickets_rrhh" cuando pregunten por cualquier empleado, saldo o ticket.
 3. Presenta los reportes manuales de forma estructurada, concisa y ejecutiva en español (lista numerada o tabla breve con nombre completo, puesto/departamento, tipo, fechas y estado/entidad), enfocándote únicamente en la cantidad y filtro pedidos sin agregar listados largos no solicitados.`;
 
 function formatDate(date) {
@@ -208,33 +208,44 @@ async function getDetallePersonalRrhh(hoyStr) {
     }
   ];
 
-  const [solicitudesRecientes, ausenciasAprobadasVigentes, incapacidadesRecientes, mayoresSaldos] =
-    await Promise.all([
-      Solicitud.findAll({
-        order: [['fecha_inicio', 'DESC']],
-        limit: 10,
-        include: colInclude
-      }),
-      Solicitud.findAll({
-        where: {
-          estado: 'aprobada',
-          fecha_inicio: { [Op.lte]: hoyStr }
-        },
-        order: [['fecha_inicio', 'DESC']],
-        limit: 10,
-        include: colInclude
-      }),
-      Incapacidad.findAll({
-        order: [['fecha_inicio', 'DESC']],
-        limit: 10,
-        include: colInclude
-      }),
-      SaldoVacaciones.findAll({
-        order: [['dias_disponibles', 'DESC']],
-        limit: 10,
-        include: colInclude
-      })
-    ]);
+  const [
+    todosColaboradores,
+    todasSolicitudes,
+    ausenciasAprobadasVigentes,
+    todasIncapacidades,
+    todosSaldos,
+    todosTickets
+  ] = await Promise.all([
+    Colaborador.findAll({
+      attributes: ['id', 'nombre', 'puesto', 'departamento', 'email', 'fecha_ingreso', 'rol', 'estado'],
+      order: [['nombre', 'ASC']],
+      raw: true
+    }),
+    Solicitud.findAll({
+      order: [['fecha_inicio', 'DESC']],
+      include: colInclude
+    }),
+    Solicitud.findAll({
+      where: {
+        estado: 'aprobada',
+        fecha_inicio: { [Op.lte]: hoyStr }
+      },
+      order: [['fecha_inicio', 'DESC']],
+      include: colInclude
+    }),
+    Incapacidad.findAll({
+      order: [['fecha_inicio', 'DESC']],
+      include: colInclude
+    }),
+    SaldoVacaciones.findAll({
+      order: [['dias_disponibles', 'DESC']],
+      include: colInclude
+    }),
+    TicketRRHH.findAll({
+      order: [['created_at', 'DESC']],
+      include: colInclude
+    })
+  ]);
 
   const mapCol = (c) => ({
     nombre: c?.nombre || 'N/D',
@@ -244,33 +255,45 @@ async function getDetallePersonalRrhh(hoyStr) {
   });
 
   return {
+    directorio_colaboradores_rrhh: todosColaboradores,
     ausencias_aprobadas_actuales_y_recientes_rrhh: ausenciasAprobadasVigentes.map((s) => ({
+      id: s.id,
       ...mapCol(s.colaborador),
       tipo: s.tipo,
       fecha_inicio: s.fecha_inicio,
       fecha_fin: s.fecha_fin,
       estado: s.estado
     })),
-    ultimas_solicitudes_rrhh: solicitudesRecientes.map((s) => ({
+    todas_solicitudes_rrhh: todasSolicitudes.map((s) => ({
+      id: s.id,
       ...mapCol(s.colaborador),
       tipo: s.tipo,
       fecha_inicio: s.fecha_inicio,
       fecha_fin: s.fecha_fin,
       estado: s.estado
     })),
-    ultimas_incapacidades_rrhh: incapacidadesRecientes.map((i) => ({
+    todas_incapacidades_rrhh: todasIncapacidades.map((i) => ({
+      id: i.id,
       ...mapCol(i.colaborador),
       tipo: i.tipo,
       fecha_inicio: i.fecha_inicio,
       dias: i.dias,
       entidad: i.entidad
     })),
-    mayores_saldos_vacaciones_rrhh: mayoresSaldos.map((sv) => ({
+    todos_saldos_vacaciones_rrhh: todosSaldos.map((sv) => ({
       ...mapCol(sv.colaborador),
       periodo: sv.periodo,
       dias_asignados: Number(sv.dias_asignados),
       dias_tomados: Number(sv.dias_tomados),
       dias_disponibles: Number(sv.dias_disponibles)
+    })),
+    todos_tickets_rrhh: todosTickets.map((t) => ({
+      id: t.id,
+      codigo: t.codigo,
+      ...mapCol(t.colaborador),
+      consulta_original: t.consulta_original,
+      estado: t.estado,
+      respuesta_rrhh: t.respuesta_rrhh
     }))
   };
 }

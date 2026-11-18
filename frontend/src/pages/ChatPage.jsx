@@ -173,7 +173,7 @@ const SOLICITUD_TIPOS = [
 ];
 
 export default function ChatPage() {
-  const { user, saldoVacaciones } = useAuth();
+  const { user, saldoVacaciones, refreshProfile } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const isRrhh = user?.rol === 'rrhh';
@@ -326,6 +326,7 @@ export default function ChatPage() {
         content: data.respuesta,
         citas: data.citas || [],
         escalada: Boolean(data.escalada),
+        accionEjecutada: Boolean(data.accionEjecutada),
         validado: data.validado !== false,
         agente: data.agente,
         intencion: data.intencion,
@@ -333,6 +334,12 @@ export default function ChatPage() {
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
+
+      if (data.accionEjecutada === true || data.intencion === 'accion_rrhh') {
+        loadRrhhSummary();
+        loadMyTickets();
+        refreshProfile();
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -1061,6 +1068,12 @@ export default function ChatPage() {
                               <span className="rounded-md border border-zinc-200 bg-[#F8F9FB] px-2 py-0.5">
                                 intención:{' '}
                                 <strong className="text-[#18181B]">{msg.intencion}</strong>
+                              </span>
+                            )}
+                            {msg.accionEjecutada && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-[#E6004C] px-2 py-0.5 font-bold text-white shadow-xs">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Acción ejecutada
                               </span>
                             )}
                             {msg.validado && (

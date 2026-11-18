@@ -87,8 +87,8 @@ Responde únicamente JSON válido (máximo 120 tokens):
 async function runFidelityLayer({ pregunta, respuesta, evidencia }) {
   const userPrompt = [
     `PREGUNTA: ${pregunta}`,
-    `EVIDENCIA:\n${String(evidencia || '').slice(0, 12000)}`,
-    `RESPUESTA:\n${String(respuesta || '').slice(0, 2200)}`
+    `EVIDENCIA:\n${String(evidencia || '').slice(0, 26000)}`,
+    `RESPUESTA:\n${String(respuesta || '').slice(0, 2400)}`
   ].join('\n\n');
 
   const raw = await chatCompletion({

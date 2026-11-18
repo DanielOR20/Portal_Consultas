@@ -2,8 +2,9 @@
 
 const { ConsultaChat, PalabraClave } = require('../models');
 const { chatCompletion } = require('../config/llmClient');
-const { runPoliticasAgent } = require('./politicasAgent');
+const { runPoliticasAgent, invalidatePolicyTermsCache } = require('./politicasAgent');
 const { runDatosAgent } = require('./datosAgent');
+const { runAccionRrhhAgent } = require('./accionRrhhAgent');
 const { validateResponse } = require('./validadorAgent');
 const { safeParseJson } = require('../utils/jsonHelper');
 
@@ -11,12 +12,21 @@ const VALID_INTENTS = [
   'politica',
   'dato_personal',
   'mixta',
+  'accion_rrhh',
   'restringida',
   'fuera_alcance'
 ];
 
 const RESTRINGIDA_MESSAGE =
   'Por políticas de privacidad y protección de datos (Ley N.° 8968), no estoy autorizado para compartir información personal, salarial ni saldos de otros colaboradores.';
+
+const RBAC_ADMIN_DENIED_MESSAGE =
+  'Por control de acceso por roles (RBAC), no tienes permisos para ejecutar acciones administrativas de Talento Humano. Esa función es exclusiva de la Dirección de RRHH.';
+
+const ADMIN_WRITE_RX =
+  /\b(aprueba|aprobar|rechaza|rechazar|acredita|acreditar|descuenta|descontar|fija\s+el\s+saldo|desactiva|desactivar|da\s+de\s+baja|dar\s+de\s+baja|reactiva|reactivar|elimina|eliminar|quita|quitar|agrega|agregar|crea\s+un|registra\s+(?:un|una|al|el)\b|resuelve|resolver|regenera|regenerar)\b/i;
+const ADMIN_TARGET_RX =
+  /\b(solicitud|vacaciones|saldo|colaborador|empleado|ticket|palabra\s+clave|reporte\s+diario|incapacidad)\b/i;
 
 const FUERA_ALCANCE_MESSAGE =
   'Soy el asistente interno de Talento Humano de NovaCore. Solo puedo ayudarte con consultas sobre políticas laborales, beneficios o tu información personal de colaborador.';
@@ -85,14 +95,20 @@ function evaluateDeterministicGuardrail(pregunta, grouped, userRol = 'colaborado
   const politicaMatches = grouped.politica.filter((kw) => containsKeyword(normQ, kw));
   const datoPersonalMatches = grouped.dato_personal.filter((kw) => containsKeyword(normQ, kw));
 
-  // Bloqueo estricto de privacidad de terceros únicamente para colaboradores estándar (nunca para rol 'rrhh')
-  if (userRol !== 'rrhh' && restringidaMatches.length > 0) {
-    const hasMultipleRestricted = restringidaMatches.length >= 2;
-    const hasRelationalPhrase = restringidaMatches.some((kw) => kw.includes(' '));
-    const hasOwnOrPolicyContext = politicaMatches.length > 0 || datoPersonalMatches.length > 0;
+  // Bloqueo estricto de privacidad de terceros y acciones administrativas para colaboradores estándar
+  if (userRol !== 'rrhh') {
+    if (ADMIN_WRITE_RX.test(normQ) && ADMIN_TARGET_RX.test(normQ)) {
+      return 'rbac_admin_denied';
+    }
 
-    if (hasMultipleRestricted || (hasRelationalPhrase && !hasOwnOrPolicyContext) || !hasOwnOrPolicyContext) {
-      return 'restringida';
+    if (restringidaMatches.length > 0) {
+      const hasMultipleRestricted = restringidaMatches.length >= 2;
+      const hasRelationalPhrase = restringidaMatches.some((kw) => kw.includes(' '));
+      const hasOwnOrPolicyContext = politicaMatches.length > 0 || datoPersonalMatches.length > 0;
+
+      if (hasMultipleRestricted || (hasRelationalPhrase && !hasOwnOrPolicyContext) || !hasOwnOrPolicyContext) {
+        return 'restringida';
+      }
     }
   }
 
@@ -112,10 +128,13 @@ function buildClassifierPrompt(userRol, grouped) {
   const rrhhRules =
     userRol === 'rrhh'
       ? `CONTEXTO PRIVILEGIADO DE ROL ("rrhh" - Dirección de Talento Humano):
-- Este usuario ESTÁ AUTORIZADO para consultar nombres, departamentos, ausencias, vacaciones, incapacidades, saldos, solicitudes pendientes, tickets abiertos y generar reportes manuales nominales de cualquier colaborador de la empresa.
-- Para rol "rrhh", NO clasifiques consultas operativas de personal (ausentes, vacaciones de compañeros, incapacidades, saldos por colaborador, reportes manuales) como "restringida"; clasifícalas como "dato_personal" (o "mixta" si además pregunta una regla de política).`
-      : `REGLA ESTRICTA DE PRIVACIDAD PARA ROL ("colaborador"):
-- Este usuario NO puede acceder a datos individuales, saldos, incapacidades, ausencias ni salarios de otros colaboradores o directivos, ni conteos globales internos; esas consultas DEBEN clasificarse como "restringida".`;
+- Este usuario ESTÁ AUTORIZADO para consultar registros nominales Y ejecutar acciones administrativas reales sobre solicitudes, colaboradores, saldos de vacaciones, incapacidades, tickets, palabras clave y regeneración de reportes.
+- Distingue claramente:
+  * Preguntas normativas sobre políticas o leyes laborales -> "politica".
+  * Consultas o reportes de lectura ("cuántas personas...", "lista de...", "reporte manual de las últimas 3 personas ausentes...") -> "dato_personal".
+  * Órdenes, propuestas o confirmaciones para modificar datos o ejecutar operaciones ("aprueba...", "rechaza...", "agrega...", "crea colaborador...", "edita...", "desactiva...", "acredita/descuenta/fija saldo...", "registra incapacidad...", "resuelve/cierra ticket...", "quita/elimina palabra clave...", "regenera el reporte diario", "vamos a aprobar...", o confirmaciones breves como "sí", "confirmo", "apruébala", "hazlo" tras una propuesta del turno previo) -> "accion_rrhh".`
+      : `REGLA ESTRICTA DE PRIVACIDAD Y RBAC PARA ROL ("colaborador"):
+- Este usuario NO puede acceder a datos individuales, saldos, incapacidades, ausencias ni salarios de otros colaboradores o directivos, NI ejecutar acciones administrativas; cualquiera de esos casos DEBE clasificarse como "restringida".`;
 
   return `Eres el Agente Orquestador del Portal Interno de Talento Humano de NovaCore Technologies Costa Rica S.A.
 El usuario autenticado actual tiene el rol: "${userRol}".
@@ -128,17 +147,22 @@ Referencias dinámicas cargadas desde la base de datos (palabras_clave):
 - Indicadores de privacidad/restringida: ${grouped.restringida.join(', ')}
 - Indicadores fuera de alcance: ${grouped.fuera_alcance.join(', ')}
 
-Clasifica la consulta del usuario en EXACTAMENTE UNA de estas 5 categorías y responde únicamente con un JSON válido:
+Clasifica la consulta del usuario en EXACTAMENTE UNA categoría y responde únicamente con un JSON válido:
 
-1. "politica": Preguntas sobre reglas generales, políticas internas de NovaCore o legislación laboral de Costa Rica. Incluye preguntas sobre si la empresa ofrece algún bono, subsidio o beneficio específico (aunque no exista en el catálogo), así como consultas generales en primera persona sobre reglas normativas (ej. "¿qué incluye mi liquidación si me despiden?", "me incapacitaron 5 días, ¿quién paga?", "¿cuánto me descuentan de planilla por CCSS?", "¿cuáles son mis derechos ARCO?").
-2. "dato_personal": Preguntas sobre los registros propios actuales del usuario autenticado en MySQL (saldo de vacaciones, solicitudes, incapacidades, próximo pago, evaluación, puesto o fecha de ingreso). Si user.rol === "rrhh", también incluye TODAS las consultas administrativas, listados nominales del personal, ausencias recientes, incapacidades, saldos de colaboradores, solicitudes pendientes, tickets abiertos y generación de reportes manuales de personal.
-3. "mixta": Preguntas que combinan consultar datos de MySQL (propios o operativos de personal si rol === "rrhh") Y una regla de política normativa.
-4. "restringida": ÚNICAMENTE cuando rol === "colaborador": preguntas que piden datos personales, salariales, evaluaciones, incapacidades o saldos de OTRO colaborador o directivo específico, o conteos globales de otros empleados.
-5. "fuera_alcance": Temas completamente ajenos a Recursos Humanos, gestión de personal, beneficios laborales o NovaCore (ej. películas, clima, recetas, chistes, programación).
+1. "politica": Preguntas sobre reglas generales, políticas internas de NovaCore o legislación laboral de Costa Rica (incluye consultas si la empresa ofrece algún bono/beneficio inexistente).
+2. "dato_personal": Consultas de lectura sobre registros propios del usuario (saldo, solicitudes, incapacidades, próximo pago, evaluación, puesto) o consultas/reportes informativos de lectura para rol "rrhh".
+3. "mixta": Preguntas que combinan consultar datos de MySQL Y una regla de política normativa.
+4. "restringida": ÚNICAMENTE cuando rol === "colaborador": datos personales/salarios de terceros, conteos globales de empresa, o intentos de ejecutar acciones administrativas RRHH.
+5. "fuera_alcance": Temas completamente ajenos a Recursos Humanos o gestión laboral (películas, clima, recetas, chistes, programación).
+${
+  userRol === 'rrhh'
+    ? '6. "accion_rrhh": ÚNICAMENTE cuando rol === "rrhh": órdenes, propuestas o confirmaciones para ejecutar acciones administrativas (aprobar/rechazar solicitudes, crear/editar/desactivar colaboradores, ajustar vacaciones, registrar incapacidades, resolver tickets, gestionar palabras clave o regenerar reporte diario).'
+    : ''
+}
 
 Responde exclusivamente en formato JSON:
 {
-  "intencion": "politica" | "dato_personal" | "mixta" | "restringida" | "fuera_alcance",
+  "intencion": "politica" | "dato_personal" | "mixta" | "accion_rrhh" | "restringida" | "fuera_alcance",
   "razon": "Justificación breve"
 }`;
 }
@@ -188,23 +212,48 @@ async function classifyIntent(pregunta, userRol, grouped, historial = []) {
 async function runOrquestadorAgent(pregunta, user, historial = []) {
   const startTime = Date.now();
   const groupedKeywords = await getActiveKeywordsGrouped();
-  const { intencion } = await classifyIntent(pregunta, user.rol, groupedKeywords, historial);
+  const classification = await classifyIntent(pregunta, user.rol, groupedKeywords, historial);
+
+  let intencion = classification.intencion;
+  let isRbacAdminDenied = false;
+
+  if (intencion === 'rbac_admin_denied') {
+    intencion = 'restringida';
+    isRbacAdminDenied = true;
+  } else if (intencion === 'accion_rrhh' && user.rol !== 'rrhh') {
+    intencion = 'restringida';
+    isRbacAdminDenied = true;
+  }
 
   let respuesta = '';
   let agente = 'AgenteOrquestador';
   let citas = [];
   let resuelta = true;
   let escalada = false;
+  let accionEjecutada = false;
   let evidencia = '';
 
   if (intencion === 'restringida') {
-    respuesta = RESTRINGIDA_MESSAGE;
+    respuesta = isRbacAdminDenied ? RBAC_ADMIN_DENIED_MESSAGE : RESTRINGIDA_MESSAGE;
     agente = 'OrquestadorGuardrail';
     resuelta = true;
     escalada = false;
   } else if (intencion === 'fuera_alcance') {
     respuesta = FUERA_ALCANCE_MESSAGE;
     agente = 'OrquestadorGuardrail';
+    resuelta = true;
+    escalada = false;
+  } else if (intencion === 'accion_rrhh') {
+    const accionResult = await runAccionRrhhAgent(pregunta, user, historial, {
+      invalidateCaches: () => {
+        invalidateKeywordsCache();
+        invalidatePolicyTermsCache();
+      }
+    });
+    respuesta = accionResult.respuesta;
+    evidencia = accionResult.evidencia || '';
+    accionEjecutada = Boolean(accionResult.accionEjecutada);
+    agente = 'AgenteAccionesRRHH';
     resuelta = true;
     escalada = false;
   } else if (intencion === 'politica') {
@@ -296,6 +345,7 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
     agente,
     citas,
     escalada,
+    accionEjecutada,
     validado: validation.valido,
     validacion_observaciones: validation.observaciones,
     latencia_ms
