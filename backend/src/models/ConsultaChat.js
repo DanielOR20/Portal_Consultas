@@ -39,6 +39,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: false
       },
+      util: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        defaultValue: null
+      },
       latencia_ms: {
         type: DataTypes.INTEGER,
         allowNull: false,

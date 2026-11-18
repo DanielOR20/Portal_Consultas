@@ -151,10 +151,14 @@ function getStats() {
         codigo_version: meta.codigo_version,
         fecha_vigencia: meta.fecha_vigencia,
         responsable: meta.responsable,
-        chunks: 0
+        webViewLink: meta.webViewLink || null,
+        chunks: 0,
+        chunksCount: 0
       });
     }
-    docsMap.get(meta.fileId).chunks += 1;
+    const entry = docsMap.get(meta.fileId);
+    entry.chunks += 1;
+    entry.chunksCount += 1;
   }
 
   return {

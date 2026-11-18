@@ -1,6 +1,7 @@
 'use strict';
 
 const ingestaAgent = require('../agents/ingestaAgent');
+const vectorStore = require('../rag/vectorStore');
 
 async function triggerSync(req, res, next) {
   try {
@@ -26,8 +27,31 @@ async function getStatus(req, res, next) {
   }
 }
 
+async function getDocuments(req, res, next) {
+  try {
+    const stats = vectorStore.getStats();
+    const documents = (stats.documents || []).map((doc) => ({
+      fileId: doc.fileId,
+      titulo: doc.titulo || doc.fileName,
+      codigo_version: doc.codigo_version || 'Documento Corporativo',
+      fileName: doc.fileName,
+      mimeType: doc.mimeType,
+      webViewLink: doc.webViewLink || null,
+      chunksCount: doc.chunksCount ?? doc.chunks ?? 0
+    }));
+
+    return res.status(200).json({
+      ok: true,
+      total: documents.length,
+      documents
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   triggerSync,
-  getStatus
+  getStatus,
+  getDocuments
 };
-

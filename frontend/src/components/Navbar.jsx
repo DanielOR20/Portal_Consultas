@@ -19,7 +19,7 @@ export default function Navbar() {
     }`;
 
   return (
-    <header className="sticky top-0 z-30 h-16 shrink-0 bg-gradient-to-r from-[#D9044B] via-[#E6004C] to-[#FF1764] text-white shadow-[0_2px_18px_rgba(230,0,76,0.28)]">
+    <header className="no-print sticky top-0 z-30 h-16 shrink-0 bg-gradient-to-r from-[#D9044B] via-[#E6004C] to-[#FF1764] text-white shadow-[0_2px_18px_rgba(230,0,76,0.28)]">
       <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-2.5">

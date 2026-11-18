@@ -1,7 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { ReporteDiario, PalabraClave } = require('../models');
+const { ReporteDiario, PalabraClave, Solicitud, Colaborador } = require('../models');
 const { generateDailyReport } = require('../agents/analistaAgent');
 const { invalidateKeywordsCache } = require('../agents/orquestadorAgent');
 const { invalidatePolicyTermsCache } = require('../agents/politicasAgent');
@@ -48,9 +48,48 @@ async function getLatest(req, res, next) {
       report = await generateDailyReport();
     }
 
+    const reportPlain = report.toJSON();
+    const pendingRows = await Solicitud.findAll({
+      where: { estado: 'pendiente' },
+      include: [
+        { model: Colaborador, as: 'colaborador', attributes: ['id', 'nombre', 'departamento'] }
+      ],
+      order: [['creada_en', 'ASC']]
+    });
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    let atrasadas = 0;
+
+    const detalle = pendingRows.map((s) => {
+      const creada = new Date(s.creada_en);
+      const diasEspera = Math.max(0, Math.floor((endOfToday - creada) / (1000 * 60 * 60 * 24)));
+      if (diasEspera > 3) {
+        atrasadas += 1;
+      }
+      return {
+        id: s.id,
+        colaborador: s.colaborador?.nombre || 'N/D',
+        departamento: s.colaborador?.departamento || 'N/D',
+        tipo: s.tipo,
+        fecha_inicio: s.fecha_inicio,
+        fecha_fin: s.fecha_fin,
+        dias_espera: diasEspera
+      };
+    });
+
+    reportPlain.datos_json = {
+      ...(reportPlain.datos_json || {}),
+      solicitudes_pendientes: {
+        total: detalle.length,
+        atrasadas_mas_3_dias: atrasadas,
+        detalle
+      }
+    };
+
     return res.status(200).json({
       ok: true,
-      reporte: report
+      reporte: reportPlain
     });
   } catch (err) {
     return next(err);

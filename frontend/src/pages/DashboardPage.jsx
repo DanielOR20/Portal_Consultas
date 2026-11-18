@@ -17,6 +17,7 @@ import {
   Activity,
   Bot,
   Calendar,
+  Check,
   CheckCircle2,
   Clock,
   Database,
@@ -27,6 +28,7 @@ import {
   KeyRound,
   Loader2,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -36,6 +38,7 @@ import {
   X
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
+import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
 import { formatDateTime, formatNumber, formatShortDate } from '../utils/formatters';
@@ -70,6 +73,7 @@ const KEYWORD_CATEGORIES = [
 
 export default function DashboardPage() {
   const { showToast } = useToast();
+  const { refreshProfile } = useAuth();
 
   const [reporte, setReporte] = useState(null);
   const [fechasDisponibles, setFechasDisponibles] = useState([]);
@@ -80,6 +84,7 @@ export default function DashboardPage() {
   const [modalTicket, setModalTicket] = useState(null);
   const [modalReplyText, setModalReplyText] = useState('');
   const [savingTicketId, setSavingTicketId] = useState(null);
+  const [processingSolicitudId, setProcessingSolicitudId] = useState(null);
 
   const [keywords, setKeywords] = useState([]);
   const [kwCategoryFilter, setKwCategoryFilter] = useState('all');
@@ -370,6 +375,89 @@ export default function DashboardPage() {
     }
   };
 
+  const handleUpdateSolicitudStatus = async (sol, nuevoEstado) => {
+    if (processingSolicitudId === sol.id) return;
+    setProcessingSolicitudId(sol.id);
+
+    try {
+      const { data } = await api.patch(`/solicitudes/${sol.id}/status`, {
+        estado: nuevoEstado
+      });
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      setReporte((prev) => {
+        if (!prev?.datos_json) return prev;
+        const d = prev.datos_json;
+        const prevPending = d.solicitudes_pendientes?.detalle || [];
+        const nextDetalle = prevPending.filter((item) => item.id !== sol.id);
+        const nextAtrasadas = nextDetalle.filter((item) => Number(item.dias_espera) > 3).length;
+
+        const nextAusentes = {
+          ...(d.ausentes_hoy || { total: 0, por_tipo: {}, por_departamento: {} }),
+          por_tipo: { ...(d.ausentes_hoy?.por_tipo || {}) },
+          por_departamento: { ...(d.ausentes_hoy?.por_departamento || {}) }
+        };
+
+        if (
+          nuevoEstado === 'aprobada' &&
+          sol.fecha_inicio <= todayStr &&
+          sol.fecha_fin >= todayStr &&
+          ['vacaciones', 'permiso_con_goce', 'permiso_sin_goce'].includes(sol.tipo)
+        ) {
+          nextAusentes.total = (nextAusentes.total || 0) + 1;
+          nextAusentes.por_tipo[sol.tipo] = (nextAusentes.por_tipo[sol.tipo] || 0) + 1;
+          const depto = sol.departamento || 'Sin departamento';
+          nextAusentes.por_departamento[depto] =
+            (nextAusentes.por_departamento[depto] || 0) + 1;
+        }
+
+        return {
+          ...prev,
+          datos_json: {
+            ...d,
+            ausentes_hoy: nextAusentes,
+            solicitudes_pendientes: {
+              total: nextDetalle.length,
+              atrasadas_mas_3_dias: nextAtrasadas,
+              detalle: nextDetalle
+            }
+          }
+        };
+      });
+
+      const discountNote =
+        nuevoEstado === 'aprobada' && data.dias_descontados > 0
+          ? ` (-${data.dias_descontados} día(s) descontados)`
+          : '';
+      showToast(
+        `Solicitud de ${sol.colaborador} marcada como ${nuevoEstado}${discountNote}.`,
+        'success',
+        3800
+      );
+
+      refreshProfile();
+      api
+        .post('/dashboard/generate', {})
+        .then((repRes) => {
+          if (repRes.data?.reporte) {
+            setReporte(repRes.data.reporte);
+          }
+        })
+        .catch(() => {});
+    } catch (err) {
+      showToast(
+        err?.response?.data?.error || 'No se pudo actualizar el estado de la solicitud.',
+        'error'
+      );
+    } finally {
+      setProcessingSolicitudId(null);
+    }
+  };
+
+  const handlePrintPdf = () => {
+    window.print();
+  };
+
   const datos = reporte?.datos_json || {};
   const ausentesHoy = datos.ausentes_hoy || { total: 0, por_tipo: {}, por_departamento: {} };
   const solicitudesPendientes = datos.solicitudes_pendientes || {
@@ -526,9 +614,27 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[#F8F9FB] text-[#18181B]">
       <Navbar />
 
-      <main className="mx-auto max-w-[1440px] space-y-5 px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-[1440px] space-y-5 px-4 py-6 sm:px-6 print:max-w-full print:px-0 print:py-0">
+        {/* Encabezado Ejecutivo exclusivo para impresión / Exportar PDF */}
+        <div className="hidden print-only border-b-2 border-[#E6004C] pb-4 mb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-[#E6004C]">
+                NovaCore Technologies Costa Rica S.A. · Talento Humano
+              </p>
+              <h1 className="mt-1 text-xl font-extrabold text-[#18181B]">
+                Reporte Ejecutivo Gerencial de RRHH
+              </h1>
+            </div>
+            <div className="text-right text-xs text-[#52525B]">
+              <p className="font-bold text-[#E6004C]">Corte: {formatShortDate(reporte?.fecha)}</p>
+              <p>Generado vía Sequelize ORM + Analista IA</p>
+            </div>
+          </div>
+        </div>
+
         {/* Barra Superior de Control */}
-        <section className="flex flex-col justify-between gap-4 rounded-2xl border border-[#FFB8D0]/60 bg-white p-4 shadow-sm xl:flex-row xl:items-center">
+        <section className="no-print flex flex-col justify-between gap-4 rounded-2xl border border-[#FFB8D0]/60 bg-white p-4 shadow-sm xl:flex-row xl:items-center">
           <div>
             <h1 className="text-lg font-extrabold tracking-tight text-[#18181B]">
               Centro de Analítica, Tickets y Cumplimiento RRHH
@@ -591,6 +697,16 @@ export default function DashboardPage() {
                 JSON
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={handlePrintPdf}
+              disabled={!reporte}
+              className="inline-flex items-center gap-2 rounded-xl border border-[#FFB8D0] bg-[#FFF0F5] px-3.5 py-2 text-xs font-bold text-[#E6004C] transition hover:bg-[#E6004C] hover:text-white disabled:opacity-50 cursor-pointer"
+            >
+              <Printer className="h-4 w-4" />
+              <span>Exportar PDF Gerencial</span>
+            </button>
 
             <button
               type="button"
@@ -815,7 +931,7 @@ export default function DashboardPage() {
                   : 'border-zinc-200/80'
               }`}
             >
-              <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 bg-[#F8F9FB] px-4 py-3 sm:px-5">
+              <div className="no-print flex flex-wrap items-center gap-2 border-b border-zinc-100 bg-[#F8F9FB] px-4 py-3 sm:px-5">
                 <button
                   type="button"
                   onClick={() => setActiveBottomTab('pending')}
@@ -898,7 +1014,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="no-print flex flex-wrap items-center gap-2.5">
                         <div className="relative">
                           <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-[#52525B]" />
                           <input
@@ -940,21 +1056,23 @@ export default function DashboardPage() {
                             <th className="px-3 py-2.5">Departamento</th>
                             <th className="px-3 py-2.5">Tipo</th>
                             <th className="px-3 py-2.5">Fechas</th>
-                            <th className="rounded-tr-xl px-3 py-2.5 text-right">
-                              Días en espera
+                            <th className="px-3 py-2.5 text-right">Días en espera</th>
+                            <th className="no-print rounded-tr-xl px-3 py-2.5 text-right">
+                              Acciones
                             </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-100">
                           {filteredPending.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="py-6 text-center text-[#52525B]">
+                              <td colSpan={6} className="py-6 text-center text-[#52525B]">
                                 No hay solicitudes pendientes que coincidan con el filtro aplicado.
                               </td>
                             </tr>
                           ) : (
                             filteredPending.map((sol) => {
                               const atrasada = Number(sol.dias_espera) > 3;
+                              const isProcessing = processingSolicitudId === sol.id;
                               return (
                                 <tr key={sol.id} className="transition hover:bg-[#FFF0F5]/60">
                                   <td className="px-3 py-2.5 font-semibold text-[#18181B]">
@@ -980,6 +1098,35 @@ export default function DashboardPage() {
                                     >
                                       {sol.dias_espera} días
                                     </span>
+                                  </td>
+                                  <td className="no-print px-3 py-2.5 text-right">
+                                    <div className="inline-flex items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        disabled={isProcessing}
+                                        onClick={() => handleUpdateSolicitudStatus(sol, 'aprobada')}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-[#E6004C] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs transition hover:bg-[#FF1764] disabled:opacity-50 cursor-pointer"
+                                      >
+                                        {isProcessing ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <Check className="h-3 w-3" />
+                                        )}
+                                        <span>Aprobar</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        disabled={isProcessing}
+                                        onClick={() =>
+                                          handleUpdateSolicitudStatus(sol, 'rechazada')
+                                        }
+                                        className="inline-flex items-center gap-1 rounded-lg border border-[#FFB8D0] bg-[#FFF0F5] px-2.5 py-1 text-[11px] font-bold text-[#E6004C] transition hover:bg-[#E6004C] hover:text-white disabled:opacity-50 cursor-pointer"
+                                      >
+                                        <X className="h-3 w-3" />
+                                        <span>Rechazar</span>
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1286,7 +1433,7 @@ export default function DashboardPage() {
       {/* Modal Elegante para Responder y Resolver Ticket RRHH */}
       {modalTicket && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs"
+          className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs"
           role="dialog"
           aria-modal="true"
         >

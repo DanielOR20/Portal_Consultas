@@ -8,6 +8,7 @@ const ingestRoutes = require('./routes/ingestRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
+const solicitudRoutes = require('./routes/solicitudRoutes');
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use('/api/ingest', ingestRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/solicitudes', solicitudRoutes);
 
 app.use((req, res) => {
   return res.status(404).json({

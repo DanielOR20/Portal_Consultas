@@ -266,7 +266,7 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
 
   const latencia_ms = Date.now() - startTime;
 
-  await ConsultaChat.create({
+  const consultaRecord = await ConsultaChat.create({
     colaborador_id: user.id,
     pregunta,
     intencion,
@@ -279,6 +279,7 @@ async function runOrquestadorAgent(pregunta, user, historial = []) {
   });
 
   return {
+    consultaId: consultaRecord.id,
     respuesta,
     intencion,
     agente,

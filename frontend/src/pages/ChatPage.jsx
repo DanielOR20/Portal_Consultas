@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  BookOpen,
   Bot,
   CalendarDays,
+  CalendarPlus,
   Check,
   CheckCircle2,
   Clock,
@@ -13,14 +15,18 @@ import {
   Loader2,
   Mic,
   MicOff,
+  Search,
   Send,
   ShieldCheck,
   Sparkles,
   Square,
+  ThumbsDown,
+  ThumbsUp,
   Ticket,
   Trash2,
   User as UserIcon,
-  Volume2
+  Volume2,
+  X
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import { useAuth } from '../hooks/useAuth';
@@ -111,6 +117,39 @@ function formatCompactDays(value) {
   return Number.isInteger(num) ? String(num) : formatNumber(num, 2);
 }
 
+function estimateBusinessDays(startStr, endStr) {
+  if (!startStr || !endStr) return 0;
+  const start = new Date(`${startStr}T12:00:00Z`);
+  const end = new Date(`${endStr}T12:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return 0;
+
+  let business = 0;
+  let calendar = 0;
+  const cursor = new Date(start.getTime());
+  while (cursor <= end) {
+    calendar += 1;
+    const dow = cursor.getUTCDay();
+    if (dow >= 1 && dow <= 5) business += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return Math.max(1, business > 0 ? business : calendar);
+}
+
+function formatMimeLabel(mimeType) {
+  if (!mimeType) return 'Documento';
+  if (mimeType.includes('document')) return 'Google Doc';
+  if (mimeType.includes('spreadsheet')) return 'Google Sheet';
+  if (mimeType.includes('pdf')) return 'PDF';
+  return 'Archivo';
+}
+
+const SOLICITUD_TIPOS = [
+  { value: 'vacaciones', label: 'Vacaciones' },
+  { value: 'permiso_con_goce', label: 'Permiso con goce de salario' },
+  { value: 'permiso_sin_goce', label: 'Permiso sin goce de salario' },
+  { value: 'teletrabajo', label: 'Teletrabajo' }
+];
+
 export default function ChatPage() {
   const { user, saldoVacaciones } = useAuth();
   const { showToast } = useToast();
@@ -124,6 +163,23 @@ export default function ChatPage() {
   const [copiedId, setCopiedId] = useState(null);
   const [createdTicketsMap, setCreatedTicketsMap] = useState({});
   const [creatingTicketId, setCreatingTicketId] = useState(null);
+
+  // Feedback de mensajes (PATCH /api/chat/:id/feedback)
+  const [feedbackMap, setFeedbackMap] = useState({});
+  const [savingFeedbackId, setSavingFeedbackId] = useState(null);
+
+  // Modal Nueva Solicitud (POST /api/solicitudes)
+  const [showSolicitudModal, setShowSolicitudModal] = useState(false);
+  const [solTipo, setSolTipo] = useState('vacaciones');
+  const [solInicio, setSolInicio] = useState('');
+  const [solFin, setSolFin] = useState('');
+  const [savingSolicitud, setSavingSolicitud] = useState(false);
+
+  // Modal Catálogo Políticas Oficiales (GET /api/ingest/documents)
+  const [showDocsModal, setShowDocsModal] = useState(false);
+  const [driveDocs, setDriveDocs] = useState([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [docSearch, setDocSearch] = useState('');
 
   const [listening, setListening] = useState(false);
   const [speakingMsgId, setSpeakingMsgId] = useState(null);
@@ -143,8 +199,23 @@ export default function ChatPage() {
     }
   }, []);
 
+  const loadDriveDocs = useCallback(async () => {
+    setLoadingDocs(true);
+    try {
+      const { data } = await api.get('/ingest/documents');
+      if (Array.isArray(data?.documents)) {
+        setDriveDocs(data.documents);
+      }
+    } catch {
+      // Silencioso si no hay documentos aún
+    } finally {
+      setLoadingDocs(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadMyTickets();
+    loadDriveDocs();
 
     return () => {
       if (recognitionRef.current) {
@@ -158,7 +229,7 @@ export default function ChatPage() {
         window.speechSynthesis.cancel();
       }
     };
-  }, [loadMyTickets]);
+  }, [loadMyTickets, loadDriveDocs]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -198,6 +269,7 @@ export default function ChatPage() {
 
       const assistantMsg = {
         id: `assistant-${Date.now()}`,
+        consultaId: data.consultaId || null,
         role: 'assistant',
         preguntaOrigen: trimmed,
         content: data.respuesta,
@@ -373,6 +445,79 @@ export default function ChatPage() {
     showToast('Vista de conversación limpiada.', 'info', 2200);
   };
 
+  const handleFeedback = async (msg, utilValue) => {
+    if (!msg.consultaId || savingFeedbackId === msg.id) return;
+    setSavingFeedbackId(msg.id);
+    try {
+      await api.patch(`/chat/${msg.consultaId}/feedback`, { util: utilValue });
+      setFeedbackMap((prev) => ({ ...prev, [msg.id]: utilValue }));
+      showToast(
+        utilValue
+          ? '¡Gracias! Valoración positiva registrada.'
+          : 'Feedback registrado para mejorar las respuestas.',
+        'success',
+        2600
+      );
+    } catch (err) {
+      showToast(err?.response?.data?.error || 'No se pudo guardar la valoración.', 'error');
+    } finally {
+      setSavingFeedbackId(null);
+    }
+  };
+
+  const handleCreateSolicitud = async (e) => {
+    e.preventDefault();
+    if (!solInicio || !solFin || savingSolicitud) return;
+
+    setSavingSolicitud(true);
+    try {
+      const { data } = await api.post('/solicitudes', {
+        tipo: solTipo,
+        fecha_inicio: solInicio,
+        fecha_fin: solFin
+      });
+
+      setShowSolicitudModal(false);
+      setSolTipo('vacaciones');
+      setSolInicio('');
+      setSolFin('');
+      showToast(
+        `Solicitud de ${data.solicitud?.tipo?.replace(/_/g, ' ')} enviada (${data.dias_solicitados} día(s) hábil(es)).`,
+        'success',
+        4200
+      );
+    } catch (err) {
+      showToast(
+        err?.response?.data?.error || 'No se pudo registrar la solicitud.',
+        'error',
+        4500
+      );
+    } finally {
+      setSavingSolicitud(false);
+    }
+  };
+
+  const handleOpenDocsModal = () => {
+    setShowDocsModal(true);
+    if (driveDocs.length === 0) {
+      loadDriveDocs();
+    }
+  };
+
+  const filteredDriveDocs = useMemo(() => {
+    const q = docSearch.trim().toLowerCase();
+    if (!q) return driveDocs;
+    return driveDocs.filter(
+      (doc) =>
+        String(doc.titulo || '').toLowerCase().includes(q) ||
+        String(doc.codigo_version || '').toLowerCase().includes(q) ||
+        String(doc.fileName || '').toLowerCase().includes(q) ||
+        formatMimeLabel(doc.mimeType).toLowerCase().includes(q)
+    );
+  }, [driveDocs, docSearch]);
+
+  const estimatedDays = estimateBusinessDays(solInicio, solFin);
+
   const diasDisponibles = Number(saldoVacaciones?.dias_disponibles ?? 0);
   const diasAsignados = Math.max(Number(saldoVacaciones?.dias_asignados ?? 15), 1);
   const diasTomados = Number(saldoVacaciones?.dias_tomados ?? 0);
@@ -449,6 +594,15 @@ export default function ChatPage() {
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowSolicitudModal(true)}
+                className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#E6004C] px-3 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#FF1764] hover:shadow-[0_0_14px_rgba(230,0,76,0.35)] cursor-pointer"
+              >
+                <CalendarPlus className="h-3.5 w-3.5" />
+                <span>Nueva Solicitud</span>
+              </button>
             </div>
           </section>
 
@@ -536,14 +690,28 @@ export default function ChatPage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleClearChat}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 bg-[#F8F9FB] px-3 py-1.5 text-xs font-semibold text-[#52525B] transition hover:border-[#FFB8D0] hover:bg-[#FFF0F5] hover:text-[#E6004C] cursor-pointer"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Limpiar chat</span>
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={handleOpenDocsModal}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#FFB8D0] bg-[#FFF0F5] px-3 py-1.5 text-xs font-bold text-[#E6004C] transition hover:bg-[#E6004C] hover:text-white cursor-pointer"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">
+                  Políticas Oficiales ({driveDocs.length || 10})
+                </span>
+                <span className="sm:hidden">Políticas ({driveDocs.length || 10})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClearChat}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 bg-[#F8F9FB] px-3 py-1.5 text-xs font-semibold text-[#52525B] transition hover:border-[#FFB8D0] hover:bg-[#FFF0F5] hover:text-[#E6004C] cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Limpiar chat</span>
+              </button>
+            </div>
           </div>
 
           {/* Zona de Mensajes */}
@@ -574,7 +742,41 @@ export default function ChatPage() {
                             Respuesta del Asistente
                           </span>
 
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {msg.consultaId && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={savingFeedbackId === msg.id}
+                                  onClick={() => handleFeedback(msg, true)}
+                                  title="Marcar respuesta como útil"
+                                  className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                                    feedbackMap[msg.id] === true
+                                      ? 'border-[#E6004C] bg-[#E6004C] text-white'
+                                      : 'border-zinc-200 bg-[#F8F9FB] text-[#52525B] hover:border-[#FFB8D0] hover:bg-[#FFF0F5] hover:text-[#E6004C]'
+                                  }`}
+                                >
+                                  <ThumbsUp className="h-3 w-3" />
+                                  <span>Útil</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={savingFeedbackId === msg.id}
+                                  onClick={() => handleFeedback(msg, false)}
+                                  title="Marcar respuesta como no útil"
+                                  className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                                    feedbackMap[msg.id] === false
+                                      ? 'border-[#E6004C] bg-[#FFF0F5] text-[#E6004C]'
+                                      : 'border-zinc-200 bg-[#F8F9FB] text-[#52525B] hover:border-[#FFB8D0] hover:bg-[#FFF0F5] hover:text-[#E6004C]'
+                                  }`}
+                                >
+                                  <ThumbsDown className="h-3 w-3" />
+                                  <span>No útil</span>
+                                </button>
+                              </>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => handleToggleSpeak(msg.id, msg.content)}
@@ -834,6 +1036,205 @@ export default function ChatPage() {
           </form>
         </section>
       </main>
+
+      {/* Modal 1: Nueva Solicitud de Vacaciones / Permiso (POST /api/solicitudes) */}
+      {showSolicitudModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-[#FFB8D0] bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-[#D9044B] to-[#FF1764] px-5 py-3.5 text-white">
+              <div className="flex items-center gap-2">
+                <CalendarPlus className="h-4 w-4" />
+                <h3 className="text-sm font-bold">Nueva Solicitud RRHH</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSolicitudModal(false)}
+                aria-label="Cerrar modal"
+                className="rounded-lg p-1 text-white/85 transition hover:bg-white/20 hover:text-white cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSolicitud} className="space-y-4 p-5 text-xs">
+              <div className="flex items-center justify-between rounded-xl border border-[#FFB8D0] bg-[#FFF0F5] px-3.5 py-2.5">
+                <span className="font-semibold text-[#18181B]">Tu saldo actual disponible:</span>
+                <span className="text-sm font-extrabold text-[#E6004C]">
+                  {formatCompactDays(diasDisponibles)} días
+                </span>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block font-bold text-[#18181B]">Tipo de solicitud</label>
+                <select
+                  value={solTipo}
+                  onChange={(e) => setSolTipo(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-200 bg-[#F8F9FB] px-3 py-2.5 text-xs font-semibold text-[#18181B] outline-none transition focus:border-[#E6004C] focus:bg-white focus:ring-4 focus:ring-[#E6004C]/15 cursor-pointer"
+                >
+                  {SOLICITUD_TIPOS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1.5 block font-bold text-[#18181B]">Fecha inicio</label>
+                  <input
+                    type="date"
+                    required
+                    value={solInicio}
+                    onChange={(e) => setSolInicio(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-200 bg-[#F8F9FB] px-3 py-2 text-xs text-[#18181B] outline-none transition focus:border-[#E6004C] focus:bg-white focus:ring-4 focus:ring-[#E6004C]/15"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block font-bold text-[#18181B]">Fecha fin</label>
+                  <input
+                    type="date"
+                    required
+                    value={solFin}
+                    min={solInicio || undefined}
+                    onChange={(e) => setSolFin(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-200 bg-[#F8F9FB] px-3 py-2 text-xs text-[#18181B] outline-none transition focus:border-[#E6004C] focus:bg-white focus:ring-4 focus:ring-[#E6004C]/15"
+                  />
+                </div>
+              </div>
+
+              {estimatedDays > 0 && (
+                <div
+                  className={`rounded-xl border px-3.5 py-2.5 text-[11px] font-semibold ${
+                    solTipo === 'vacaciones' && estimatedDays > diasDisponibles
+                      ? 'border-[#E6004C] bg-[#FFF0F5] text-[#E6004C]'
+                      : 'border-zinc-200 bg-[#F8F9FB] text-[#52525B]'
+                  }`}
+                >
+                  Duración estimada: <strong className="text-[#18181B]">{estimatedDays}</strong>{' '}
+                  día(s) hábil(es).
+                  {solTipo === 'vacaciones' && estimatedDays > diasDisponibles && (
+                    <span className="mt-0.5 block">
+                      Supera tus {formatCompactDays(diasDisponibles)} días disponibles.
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowSolicitudModal(false)}
+                  className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-semibold text-[#52525B] transition hover:bg-zinc-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSolicitud || !solInicio || !solFin}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#E6004C] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#FF1764] hover:shadow-[0_0_16px_rgba(230,0,76,0.35)] disabled:opacity-50 cursor-pointer"
+                >
+                  {savingSolicitud && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>Enviar Solicitud</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Catálogo de Políticas Oficiales (GET /api/ingest/documents) */}
+      {showDocsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#FFB8D0] bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-[#D9044B] to-[#FF1764] px-5 py-3.5 text-white">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                <h3 className="text-sm font-bold">
+                  Catálogo de Políticas Oficiales en Google Drive ({driveDocs.length})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDocsModal(false)}
+                aria-label="Cerrar catálogo"
+                className="rounded-lg p-1 text-white/85 transition hover:bg-white/20 hover:text-white cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="shrink-0 border-b border-zinc-100 bg-[#F8F9FB] px-5 py-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-[#52525B]" />
+                <input
+                  type="text"
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  placeholder="Buscar por título, código (ej. POL-RRHH-01) o formato..."
+                  className="w-full rounded-xl border border-zinc-200 bg-white py-2 pr-4 pl-10 text-xs text-[#18181B] placeholder-[#52525B]/70 outline-none transition focus:border-[#E6004C] focus:ring-4 focus:ring-[#E6004C]/15"
+                />
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-5">
+              {loadingDocs ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-xs font-medium text-[#52525B]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#E6004C]" />
+                  <span>Cargando documentos indexados...</span>
+                </div>
+              ) : filteredDriveDocs.length === 0 ? (
+                <p className="py-8 text-center text-xs text-[#52525B]">
+                  No se encontraron documentos que coincidan con tu búsqueda.
+                </p>
+              ) : (
+                filteredDriveDocs.map((doc) => (
+                  <div
+                    key={doc.fileId}
+                    className="flex flex-col justify-between gap-3 rounded-xl border border-zinc-200/80 bg-[#F8F9FB] p-3.5 transition hover:border-[#FFB8D0] hover:bg-[#FFF0F5]/50 sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-[#E6004C] px-2.5 py-0.5 text-[10px] font-bold text-white">
+                          {doc.codigo_version}
+                        </span>
+                        <span className="rounded-full border border-[#FFB8D0] bg-white px-2 py-0.5 text-[10px] font-bold text-[#E6004C]">
+                          {formatMimeLabel(doc.mimeType)}
+                        </span>
+                        <span className="text-[10px] font-medium text-[#52525B]">
+                          {doc.chunksCount} chunks
+                        </span>
+                      </div>
+                      <h4 className="truncate text-xs font-bold text-[#18181B]">{doc.titulo}</h4>
+                      <p className="truncate text-[11px] text-[#52525B]">{doc.fileName}</p>
+                    </div>
+
+                    {doc.webViewLink && (
+                      <a
+                        href={doc.webViewLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#E6004C] px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-[#FF1764] hover:shadow-[0_0_12px_rgba(230,0,76,0.3)]"
+                      >
+                        <span>Abrir en Drive</span>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

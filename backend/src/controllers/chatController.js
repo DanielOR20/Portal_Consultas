@@ -21,6 +21,10 @@ const chatSchema = z.object({
     .default([])
 });
 
+const feedbackSchema = z.object({
+  util: z.boolean({ required_error: 'El campo booleano util es obligatorio.' })
+});
+
 async function postChat(req, res, next) {
   try {
     const parsed = chatSchema.safeParse(req.body);
@@ -61,8 +65,55 @@ async function getChatHistory(req, res, next) {
   }
 }
 
+async function submitFeedback(req, res, next) {
+  try {
+    const consultaId = Number(req.params.id);
+    if (!Number.isInteger(consultaId) || consultaId <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'ID de consulta inválido.'
+      });
+    }
+
+    const parsed = feedbackSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        ok: false,
+        error: parsed.error.issues[0]?.message || 'Valoración inválida.'
+      });
+    }
+
+    const consulta = await ConsultaChat.findOne({
+      where: {
+        id: consultaId,
+        colaborador_id: req.user.id
+      }
+    });
+
+    if (!consulta) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Consulta de chat no encontrada.'
+      });
+    }
+
+    await ConsultaChat.update(
+      { util: parsed.data.util },
+      { where: { id: consultaId, colaborador_id: req.user.id } }
+    );
+
+    return res.status(200).json({
+      ok: true,
+      consultaId,
+      util: parsed.data.util
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   postChat,
-  getChatHistory
+  getChatHistory,
+  submitFeedback
 };
-
