@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
+  ArrowRight,
+  BarChart3,
   BookOpen,
   Bot,
   CalendarDays,
@@ -81,12 +84,27 @@ const SUGGESTED_QUESTIONS = [
   }
 ];
 
-const RRHH_SUGGESTION = {
-  categoria: 'Vacaciones',
-  pregunta: '¿Cuántas personas están de vacaciones hoy?'
-};
+const RRHH_ADMIN_SUGGESTIONS = [
+  {
+    categoria: 'Ausencias',
+    pregunta: '¿Cuántas personas están de vacaciones o incapacitadas hoy?'
+  },
+  {
+    categoria: 'Solicitudes',
+    pregunta: '¿Cuántas solicitudes están pendientes de aprobación actualmente?'
+  },
+  {
+    categoria: 'Pasivo',
+    pregunta: '¿Cuántos colaboradores tienen más de 20 días de vacaciones acumulados?'
+  },
+  {
+    categoria: 'Tickets',
+    pregunta: '¿Cuántos tickets escalados tenemos abiertos y qué resumen hay hoy?'
+  }
+];
 
 const FILTER_TABS = ['Todas', 'Vacaciones', 'Pagos', 'Teletrabajo', 'Privacidad'];
+const RRHH_FILTER_TABS = ['Todas', 'Ausencias', 'Solicitudes', 'Pasivo', 'Tickets'];
 
 const WELCOME_MESSAGE = {
   id: 'welcome',
@@ -153,9 +171,12 @@ const SOLICITUD_TIPOS = [
 export default function ChatPage() {
   const { user, saldoVacaciones } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
+  const isRrhh = user?.rol === 'rrhh';
 
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [myTickets, setMyTickets] = useState([]);
+  const [rrhhSummary, setRrhhSummary] = useState(null);
   const [activeCategory, setActiveCategory] = useState('Todas');
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -213,9 +234,30 @@ export default function ChatPage() {
     }
   }, []);
 
+  const loadRrhhSummary = useCallback(async () => {
+    if (!isRrhh) return;
+    try {
+      const [dashRes, tktRes] = await Promise.all([
+        api.get('/dashboard/latest'),
+        api.get('/tickets')
+      ]);
+      const d = dashRes.data?.reporte?.datos_json || {};
+      const allTickets = Array.isArray(tktRes.data?.tickets) ? tktRes.data.tickets : [];
+      setRrhhSummary({
+        ausentesHoy: d.ausentes_hoy?.total ?? 0,
+        solicitudesPendientes: d.solicitudes_pendientes?.total ?? 0,
+        pasivoAlto: d.riesgo_pasivo_vacaciones?.total_colaboradores ?? 0,
+        ticketsAbiertos: allTickets.filter((t) => t.estado === 'abierto').length
+      });
+    } catch {
+      // Silencioso si falla temporalmente
+    }
+  }, [isRrhh]);
+
   useEffect(() => {
     loadMyTickets();
     loadDriveDocs();
+    loadRrhhSummary();
 
     return () => {
       if (recognitionRef.current) {
@@ -229,18 +271,23 @@ export default function ChatPage() {
         window.speechSynthesis.cancel();
       }
     };
-  }, [loadMyTickets, loadDriveDocs]);
+  }, [loadMyTickets, loadDriveDocs, loadRrhhSummary]);
+
+  useEffect(() => {
+    setActiveCategory('Todas');
+  }, [isRrhh]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, sending]);
 
+  const activeFilterTabs = isRrhh ? RRHH_FILTER_TABS : FILTER_TABS;
+
   const filteredSuggestions = useMemo(() => {
-    const all =
-      user?.rol === 'rrhh' ? [...SUGGESTED_QUESTIONS, RRHH_SUGGESTION] : SUGGESTED_QUESTIONS;
+    const all = isRrhh ? RRHH_ADMIN_SUGGESTIONS : SUGGESTED_QUESTIONS;
     if (activeCategory === 'Todas') return all;
     return all.filter((item) => item.categoria === activeCategory);
-  }, [activeCategory, user?.rol]);
+  }, [activeCategory, isRrhh]);
 
   const sendQuestion = async (questionText) => {
     const trimmed = String(questionText || '').trim();
@@ -606,6 +653,66 @@ export default function ChatPage() {
             </div>
           </section>
 
+          {/* Tarjeta Diferenciada Copiloto RRHH (solo rol rrhh) */}
+          {isRrhh && (
+            <section className="shrink-0 rounded-2xl border border-[#FFB8D0] bg-white p-3.5 shadow-sm">
+              <div className="mb-2.5 flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#E6004C]">
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  Resumen Operativo RRHH
+                </span>
+                <span className="rounded-full bg-[#FFF0F5] px-2 py-0.5 text-[10px] font-bold text-[#E6004C]">
+                  Admin
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                <div className="rounded-xl border border-[#FFB8D0]/80 bg-[#FFF0F5] px-2 py-1.5">
+                  <span className="block text-[10px] font-medium text-[#52525B]">
+                    Tickets abiertos
+                  </span>
+                  <strong className="text-sm font-extrabold text-[#E6004C]">
+                    {rrhhSummary?.ticketsAbiertos ?? '—'}
+                  </strong>
+                </div>
+                <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-2 py-1.5">
+                  <span className="block text-[10px] font-medium text-[#52525B]">
+                    Solic. pendientes
+                  </span>
+                  <strong className="text-sm font-extrabold text-[#18181B]">
+                    {rrhhSummary?.solicitudesPendientes ?? '—'}
+                  </strong>
+                </div>
+                <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-2 py-1.5">
+                  <span className="block text-[10px] font-medium text-[#52525B]">
+                    Ausentes hoy
+                  </span>
+                  <strong className="text-sm font-extrabold text-[#18181B]">
+                    {rrhhSummary?.ausentesHoy ?? '—'}
+                  </strong>
+                </div>
+                <div className="rounded-xl border border-[#FFB8D0]/80 bg-[#FFF0F5] px-2 py-1.5">
+                  <span className="block text-[10px] font-medium text-[#52525B]">
+                    Pasivo &gt;20d
+                  </span>
+                  <strong className="text-sm font-extrabold text-[#E6004C]">
+                    {rrhhSummary?.pasivoAlto ?? '—'}
+                  </strong>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard')}
+                className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#E6004C] bg-[#FFF0F5] px-3 py-1.5 text-xs font-bold text-[#E6004C] transition hover:bg-[#E6004C] hover:text-white cursor-pointer"
+              >
+                <BarChart3 className="h-3.5 w-3.5" />
+                <span>Abrir Dashboard RRHH</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </section>
+          )}
+
           {/* Bloque 2: Tarjeta "Mis Tickets RRHH" con scroll interno */}
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#FFB8D0]/60 bg-white shadow-sm">
             <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-4 py-3">
@@ -675,10 +782,16 @@ export default function ChatPage() {
                 <Bot className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h1 className="truncate text-sm font-bold text-[#18181B]">
                     Asistente Virtual de Talento Humano
                   </h1>
+                  {isRrhh && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gradient-to-r from-[#D9044B] to-[#FF1764] px-2.5 py-0.5 text-[10px] font-bold text-white shadow-[0_0_10px_rgba(230,0,76,0.28)]">
+                      <ShieldCheck className="h-3 w-3" />
+                      Copiloto Gerencial RRHH
+                    </span>
+                  )}
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#FFB8D0] bg-[#FFF0F5] px-2 py-0.5 text-[10px] font-bold text-[#E6004C]">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     En línea
@@ -962,7 +1075,7 @@ export default function ChatPage() {
                 <Sparkles className="h-3.5 w-3.5" />
                 Explorar:
               </span>
-              {FILTER_TABS.map((tab) => {
+              {activeFilterTabs.map((tab) => {
                 const active = activeCategory === tab;
                 return (
                   <button

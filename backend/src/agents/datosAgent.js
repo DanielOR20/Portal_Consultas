@@ -5,7 +5,9 @@ const {
   Colaborador,
   SaldoVacaciones,
   Solicitud,
-  Incapacidad
+  Incapacidad,
+  TicketRRHH,
+  ReporteDiario
 } = require('../models');
 const { chatCompletion } = require('../config/llmClient');
 
@@ -15,7 +17,8 @@ Tu función es responder la consulta del colaborador autenticado utilizando ÚNI
 REGLAS ESTRICTAS:
 1. Usa exclusivamente los números, fechas y estados presentes en el JSON proporcionado. No inventes ni estimes cifras.
 2. Si el contexto no contiene datos de terceros o salarios individuales, explica que solo tienes acceso a los datos del colaborador autenticado (o métricas agregadas si es usuario RRHH).
-3. Responde en español con tono amable, claro, directo y profesional.`;
+3. Cuando el usuario tenga rol "rrhh" y el contexto incluya resumen_agregado_empresa_rrhh, utiliza también los conteos de tickets escalados abiertos, las solicitudes pendientes más antiguas y el último resumen ejecutivo diario si la consulta los requiere.
+4. Responde en español con tono amable, claro, directo y profesional.`;
 
 function formatDate(date) {
   const y = date.getFullYear();
@@ -98,7 +101,10 @@ async function getAgregadosEmpresa(hoyStr) {
     permisosHoy,
     solicitudesPendientes,
     colaboradoresPasivoAlto,
-    incapacidadesActivasRaw
+    incapacidadesActivasRaw,
+    ticketsAbiertosCount,
+    solicitudesAntiguasRaw,
+    ultimoReporte
   ] = await Promise.all([
     Colaborador.count({ where: { estado: 'activo' } }),
     Solicitud.count({
@@ -130,6 +136,24 @@ async function getAgregadosEmpresa(hoyStr) {
     Incapacidad.findAll({
       attributes: ['fecha_inicio', 'dias', 'tipo', 'entidad'],
       raw: true
+    }),
+    TicketRRHH.count({ where: { estado: 'abierto' } }),
+    Solicitud.findAll({
+      where: { estado: 'pendiente' },
+      include: [
+        {
+          model: Colaborador,
+          as: 'colaborador',
+          attributes: ['nombre', 'departamento']
+        }
+      ],
+      order: [['creada_en', 'ASC']],
+      limit: 5
+    }),
+    ReporteDiario.findOne({
+      order: [['fecha', 'DESC']],
+      attributes: ['fecha', 'resumen_texto'],
+      raw: true
     })
   ]);
 
@@ -141,6 +165,16 @@ async function getAgregadosEmpresa(hoyStr) {
     return start <= hoyDate && hoyDate <= end;
   }).length;
 
+  const solicitudesPendientesMasAntiguas = solicitudesAntiguasRaw.map((sol) => ({
+    id: sol.id,
+    colaborador: sol.colaborador?.nombre || 'N/D',
+    departamento: sol.colaborador?.departamento || 'N/D',
+    tipo: sol.tipo,
+    fecha_inicio: sol.fecha_inicio,
+    fecha_fin: sol.fecha_fin,
+    creada_en: sol.creada_en
+  }));
+
   return {
     fecha_consulta: hoyStr,
     colaboradores_activos: totalActivos,
@@ -149,7 +183,12 @@ async function getAgregadosEmpresa(hoyStr) {
     con_permiso_hoy: permisosHoy,
     incapacidades_activas_hoy: incapacidadesActivasHoy,
     solicitudes_pendientes_totales: solicitudesPendientes,
-    colaboradores_con_mas_de_20_dias_vacaciones: colaboradoresPasivoAlto
+    solicitudes_pendientes_mas_antiguas: solicitudesPendientesMasAntiguas,
+    tickets_escalados_abiertos: ticketsAbiertosCount,
+    colaboradores_con_mas_de_20_dias_vacaciones: colaboradoresPasivoAlto,
+    ultimo_resumen_diario: ultimoReporte
+      ? { fecha: ultimoReporte.fecha, resumen_texto: ultimoReporte.resumen_texto }
+      : null
   };
 }
 

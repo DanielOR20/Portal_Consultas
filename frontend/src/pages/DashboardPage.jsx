@@ -19,9 +19,14 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
+  Code2,
   Database,
-  Download,
+  Eye,
+  FileSpreadsheet,
+  FileText,
   FileWarning,
   FolderSync,
   HeartPulse,
@@ -102,6 +107,8 @@ export default function DashboardPage() {
   const [rightChartView, setRightChartView] = useState('temas');
   const [activeBottomTab, setActiveBottomTab] = useState('pending');
   const [highlightedSection, setHighlightedSection] = useState(null);
+  const [showReportPreview, setShowReportPreview] = useState(false);
+  const [showJsonPreview, setShowJsonPreview] = useState(false);
 
   const chartsRef = useRef(null);
   const bottomTabsRef = useRef(null);
@@ -218,7 +225,7 @@ export default function DashboardPage() {
       fecha: reporte.fecha,
       generado_por: reporte.generado_por,
       resumen_ejecutivo: reporte.resumen_texto,
-      indicadores: reporte.datos_json
+      metricas_json: reporte.datos_json
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -525,6 +532,8 @@ export default function DashboardPage() {
         borderColor: '#E6004C',
         backgroundColor: 'rgba(230, 0, 76, 0.12)',
         pointBackgroundColor: '#E6004C',
+        pointRadius: 2,
+        pointHoverRadius: 5,
         tension: 0.35,
         fill: true
       },
@@ -534,6 +543,8 @@ export default function DashboardPage() {
         borderColor: '#FF709E',
         backgroundColor: 'rgba(255, 112, 158, 0.14)',
         pointBackgroundColor: '#FF2A70',
+        pointRadius: 2,
+        pointHoverRadius: 5,
         tension: 0.35,
         fill: false
       }
@@ -550,6 +561,7 @@ export default function DashboardPage() {
       x: { ticks: { color: '#52525B', font: { size: 10 } }, grid: { color: '#F1F5F9' } },
       y: {
         beginAtZero: true,
+        grace: '10%',
         ticks: { color: '#52525B', precision: 0 },
         grid: { color: '#F1F5F9' }
       }
@@ -564,21 +576,27 @@ export default function DashboardPage() {
         label: 'Consultas (30 días)',
         data: topIntenciones.map((t) => t.total),
         backgroundColor: ['#E6004C', '#FF2A70', '#FF709E', '#B8003E', '#FFB8D0'],
-        borderRadius: 8
+        borderRadius: 6,
+        barThickness: 22
       }
     ]
   };
 
   const barChartOptions = {
+    indexAxis: 'y',
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      x: { ticks: { color: '#18181B', font: { size: 11 } }, grid: { display: false } },
-      y: {
+      x: {
         beginAtZero: true,
+        grace: '10%',
         ticks: { color: '#52525B', precision: 0 },
         grid: { color: '#F1F5F9' }
+      },
+      y: {
+        ticks: { color: '#18181B', font: { size: 11, weight: '600' } },
+        grid: { display: false }
       }
     }
   };
@@ -614,8 +632,12 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[#F8F9FB] text-[#18181B]">
       <Navbar />
 
-      <main className="mx-auto max-w-[1440px] space-y-5 px-4 py-6 sm:px-6 print:max-w-full print:px-0 print:py-0">
-        {/* Encabezado Ejecutivo exclusivo para impresión / Exportar PDF */}
+      <main
+        className={`mx-auto max-w-[1440px] space-y-5 px-4 py-6 sm:px-6 print:max-w-full print:px-0 print:py-0 ${
+          showReportPreview ? 'print:hidden' : ''
+        }`}
+      >
+        {/* Encabezado Ejecutivo exclusivo para impresión directa */}
         <div className="hidden print-only border-b-2 border-[#E6004C] pb-4 mb-4">
           <div className="flex items-center justify-between">
             <div>
@@ -675,37 +697,17 @@ export default function DashboardPage() {
               </select>
             </div>
 
-            <div className="inline-flex items-center overflow-hidden rounded-xl border border-[#FFB8D0] bg-[#FFF0F5]">
-              <span className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-semibold text-[#18181B]">
-                <Download className="h-3.5 w-3.5 text-[#E6004C]" />
-                Descargar Reporte:
-              </span>
-              <button
-                type="button"
-                onClick={handleDownloadCsv}
-                disabled={!reporte}
-                className="border-l border-[#FFB8D0] bg-white px-2.5 py-2 text-[11px] font-bold text-[#E6004C] transition hover:bg-[#FFF0F5] cursor-pointer"
-              >
-                CSV
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadJson}
-                disabled={!reporte}
-                className="border-l border-[#FFB8D0] bg-white px-2.5 py-2 text-[11px] font-bold text-[#E6004C] transition hover:bg-[#FFF0F5] cursor-pointer"
-              >
-                JSON
-              </button>
-            </div>
-
             <button
               type="button"
-              onClick={handlePrintPdf}
+              onClick={() => {
+                setShowJsonPreview(false);
+                setShowReportPreview(true);
+              }}
               disabled={!reporte}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#FFB8D0] bg-[#FFF0F5] px-3.5 py-2 text-xs font-bold text-[#E6004C] transition hover:bg-[#E6004C] hover:text-white disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center gap-2 rounded-xl border border-[#E6004C] bg-[#FFF0F5] px-4 py-2 text-xs font-bold text-[#E6004C] transition hover:bg-[#E6004C] hover:text-white hover:shadow-[0_0_16px_rgba(230,0,76,0.3)] disabled:opacity-50 cursor-pointer"
             >
-              <Printer className="h-4 w-4" />
-              <span>Exportar PDF Gerencial</span>
+              <Eye className="h-4 w-4" />
+              <span>Previsualizar Reporte Diario</span>
             </button>
 
             <button
@@ -860,33 +862,35 @@ export default function DashboardPage() {
               </button>
             </section>
 
-            {/* Fila de Gráficos (7 + 5) */}
+            {/* Fila de Gráficos Simétrica (2 columnas iguales lg:grid-cols-2 gap-6) */}
             <section
               ref={chartsRef}
-              className={`grid grid-cols-1 gap-5 rounded-2xl transition-all lg:grid-cols-12 ${
+              className={`grid grid-cols-1 gap-6 rounded-2xl transition-all lg:grid-cols-2 ${
                 highlightedSection === 'charts'
                   ? 'ring-2 ring-[#E6004C] ring-offset-4 ring-offset-[#F8F9FB]'
                   : ''
               }`}
             >
-              <div className="rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-sm lg:col-span-7">
-                <h3 className="mb-4 text-sm font-bold text-[#18181B]">
-                  Tendencia de 30 Días: Consultas y Ausencias
-                </h3>
+              <div className="rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex min-h-[28px] items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-[#18181B]">
+                    Tendencia de 30 Días: Consultas y Ausencias
+                  </h3>
+                </div>
                 <div className="h-72">
                   <Line data={lineChartData} options={lineChartOptions} />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-sm lg:col-span-5">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex min-h-[28px] flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-bold text-[#18181B]">
                     {rightChartView === 'temas'
                       ? 'Top Temas Consultados'
                       : 'Ausencias por Departamento'}
                   </h3>
 
-                  <div className="inline-flex rounded-full border border-[#FFB8D0] bg-[#FFF0F5] p-0.5 text-[11px] font-semibold">
+                  <div className="no-print inline-flex rounded-full border border-[#FFB8D0] bg-[#FFF0F5] p-0.5 text-[11px] font-semibold">
                     <button
                       type="button"
                       onClick={() => setRightChartView('temas')}
@@ -1495,6 +1499,223 @@ export default function DashboardPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Vista Previa Interactiva del Reporte Diario y Centro de Exportación */}
+      {showReportPreview && reporte && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-xs print:static print:block print:bg-white print:p-0 print:backdrop-blur-none"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#FFB8D0] bg-white shadow-2xl print:max-h-none print:max-w-none print:overflow-visible print:rounded-none print:border-0 print:shadow-none">
+            {/* 1. Encabezado del documento */}
+            <div className="flex shrink-0 items-start justify-between gap-4 bg-gradient-to-r from-[#D9044B] via-[#E6004C] to-[#FF1764] px-6 py-4 text-white">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                    <FileText className="h-3 w-3" />
+                    Generado por Agente Analista (Sequelize ORM)
+                  </span>
+                  <span className="rounded-full bg-white px-2.5 py-0.5 text-[10px] font-extrabold text-[#E6004C]">
+                    Fecha: {formatShortDate(reporte.fecha)}
+                  </span>
+                </div>
+                <h2 className="mt-2 text-base font-extrabold leading-snug sm:text-lg">
+                  Reporte Diario de Gestión de Talento Humano — NovaCore Technologies CR
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowReportPreview(false)}
+                aria-label="Cerrar vista previa"
+                className="no-print shrink-0 rounded-lg p-1.5 text-white/85 transition hover:bg-white/20 hover:text-white cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Cuerpo scrollable en pantalla, completo al imprimir */}
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6 print:overflow-visible print:p-5">
+              {/* 2. Resumen Ejecutivo */}
+              <div className="print-avoid-break rounded-xl border border-[#FFB8D0] border-l-4 border-l-[#E6004C] bg-[#FFF0F5] p-4">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#E6004C]">
+                  Resumen Ejecutivo
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-[#18181B]">
+                  {reporte.resumen_texto}
+                </p>
+              </div>
+
+              {/* 3. Tabla Estructurada de Indicadores del Día */}
+              <div className="print-avoid-break overflow-hidden rounded-xl border border-[#FFB8D0]">
+                <div className="border-b border-[#FFB8D0] bg-[#FFF0F5] px-4 py-2.5">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#E6004C]">
+                    Indicadores Oficiales del Día
+                  </h3>
+                </div>
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-zinc-200 bg-[#F8F9FB] text-[11px] uppercase text-[#52525B]">
+                    <tr>
+                      <th className="px-4 py-2.5">Indicador</th>
+                      <th className="px-4 py-2.5">Valor Medido</th>
+                      <th className="px-4 py-2.5">Detalle</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 text-[#18181B]">
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Colaboradores Activos</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {rotacion.total_activos}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        Rotación mensual: {rotacion.tasa_rotacion_pct}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Ausentes Hoy</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {ausentesHoy.total}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        Vac: {ausentesHoy.por_tipo?.vacaciones ?? 0} · Perm:{' '}
+                        {(ausentesHoy.por_tipo?.permiso_con_goce ?? 0) +
+                          (ausentesHoy.por_tipo?.permiso_sin_goce ?? 0)}{' '}
+                        · Incap: {ausentesHoy.por_tipo?.incapacidad ?? 0}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Solicitudes Pendientes</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {solicitudesPendientes.total}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        {solicitudesPendientes.atrasadas_mas_3_dias} con espera &gt; 3 días
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Incapacidades Activas</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {incapacidadesMes.activas_hoy}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        {incapacidadesMes.total_dias_mes} días acumulados · CCSS:{' '}
+                        {incapacidadesMes.desglose_entidad?.CCSS?.cantidad ?? 0} / INS:{' '}
+                        {incapacidadesMes.desglose_entidad?.INS?.cantidad ?? 0}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Riesgo Pasivo &gt; 20 días</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {riesgoPasivo.total_colaboradores}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        Colaboradores sobre tope de acumulación
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Consultas Chatbot 24h</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {metricasChatbot.consultas_ultimas_24h}
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        Consultas procesadas por el sistema multiagente
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Tasa Resolución sin Escalar</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {formatNumber(metricasChatbot.porcentaje_resueltas_sin_escalar, 1)}%
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        Autoservicio resuelto sin intervención manual
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Latencia Promedio</td>
+                      <td className="px-4 py-2.5 font-extrabold text-[#E6004C]">
+                        {metricasChatbot.latencia_promedio_ms} ms
+                      </td>
+                      <td className="px-4 py-2.5 text-[#52525B]">
+                        Incluyendo orquestación y validación de fidelidad
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-semibold">Top 5 Temas</td>
+                      <td colSpan={2} className="px-4 py-2.5 text-[#52525B]">
+                        {topIntenciones.length > 0
+                          ? topIntenciones.map((t) => `${t.intencion} (${t.total})`).join(' · ')
+                          : 'Sin registros en los últimos 30 días'}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 4. Acordeón técnico Ver estructura JSON (metricas_json) */}
+              <div className="no-print overflow-hidden rounded-xl border border-zinc-200 bg-[#F8F9FB]">
+                <button
+                  type="button"
+                  onClick={() => setShowJsonPreview((prev) => !prev)}
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-bold text-[#18181B] transition hover:bg-[#FFF0F5] hover:text-[#E6004C] cursor-pointer"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Code2 className="h-4 w-4 text-[#E6004C]" />
+                    Ver estructura JSON (metricas_json)
+                  </span>
+                  {showJsonPreview ? (
+                    <ChevronUp className="h-4 w-4 text-[#E6004C]" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-[#52525B]" />
+                  )}
+                </button>
+
+                {showJsonPreview && (
+                  <pre className="max-h-60 overflow-auto border-t border-[#FFB8D0] bg-white p-4 font-mono text-[11px] leading-relaxed text-[#18181B]">
+                    {JSON.stringify(reporte.datos_json || {}, null, 2)}
+                  </pre>
+                )}
+              </div>
+            </div>
+
+            {/* 5. Barra inferior de Exportación */}
+            <div className="no-print flex shrink-0 flex-wrap items-center justify-between gap-2.5 border-t border-zinc-100 bg-[#F8F9FB] px-6 py-4">
+              <span className="text-[11px] font-medium text-[#52525B]">
+                Exportar reporte oficial del {formatShortDate(reporte.fecha)}:
+              </span>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadCsv}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#FFB8D0] bg-white px-3.5 py-2 text-xs font-bold text-[#E6004C] transition hover:bg-[#FFF0F5] cursor-pointer"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  <span>Exportar Excel (.CSV)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadJson}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#FFB8D0] bg-white px-3.5 py-2 text-xs font-bold text-[#E6004C] transition hover:bg-[#FFF0F5] cursor-pointer"
+                >
+                  <Code2 className="h-3.5 w-3.5" />
+                  <span>Exportar JSON (.JSON)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintPdf}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#E6004C] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#FF1764] hover:shadow-[0_0_16px_rgba(230,0,76,0.35)] cursor-pointer"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>Exportar / Imprimir PDF</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

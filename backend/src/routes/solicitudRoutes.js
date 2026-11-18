@@ -11,3 +11,4 @@ router.post('/', authMiddleware, solicitudController.createSolicitud);
 router.patch('/:id/status', authMiddleware, requireRole('rrhh'), solicitudController.updateSolicitudStatus);
 
 module.exports = router;
+
