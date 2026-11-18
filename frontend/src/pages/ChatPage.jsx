@@ -86,6 +86,10 @@ const SUGGESTED_QUESTIONS = [
 
 const RRHH_ADMIN_SUGGESTIONS = [
   {
+    categoria: 'Reportes',
+    pregunta: 'Genera un reporte manual de las últimas 3 personas ausentes'
+  },
+  {
     categoria: 'Ausencias',
     pregunta: '¿Cuántas personas están de vacaciones o incapacitadas hoy?'
   },
@@ -104,7 +108,7 @@ const RRHH_ADMIN_SUGGESTIONS = [
 ];
 
 const FILTER_TABS = ['Todas', 'Vacaciones', 'Pagos', 'Teletrabajo', 'Privacidad'];
-const RRHH_FILTER_TABS = ['Todas', 'Ausencias', 'Solicitudes', 'Pasivo', 'Tickets'];
+const RRHH_FILTER_TABS = ['Todas', 'Reportes', 'Ausencias', 'Solicitudes', 'Pasivo', 'Tickets'];
 
 const WELCOME_MESSAGE = {
   id: 'welcome',
@@ -595,62 +599,86 @@ export default function ChatPage() {
               </div>
             </div>
 
-            <div className="p-4">
-              <div className="mb-2.5 flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#52525B]">
-                  <CalendarDays className="h-3.5 w-3.5 text-[#E6004C]" />
-                  Vacaciones {saldoVacaciones?.periodo || 2026}
-                </span>
-                {alertaPasivo ? (
-                  <span className="rounded-full bg-[#E6004C] px-2 py-0.5 text-[10px] font-bold text-white">
-                    &gt; 20 días
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-bold text-[#E6004C]">{progressPct}%</span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl border border-[#FFB8D0] bg-[#FFF0F5] px-2 py-2 text-center">
-                  <span className="block text-[10px] font-semibold text-[#52525B]">
-                    Disponibles
-                  </span>
-                  <span className="mt-0.5 block text-lg font-extrabold text-[#E6004C]">
-                    {formatCompactDays(diasDisponibles)}
+            {isRrhh ? (
+              <div className="flex items-center justify-between gap-2 p-3 text-xs">
+                <div className="flex min-w-0 items-center gap-1.5 text-[#18181B]">
+                  <CalendarDays className="h-3.5 w-3.5 shrink-0 text-[#E6004C]" />
+                  <span className="truncate font-medium text-[#52525B]">Vacaciones:</span>
+                  <strong className="shrink-0 font-extrabold text-[#E6004C]">
+                    {formatCompactDays(diasDisponibles)} disp.
+                  </strong>
+                  <span className="shrink-0 text-[11px] text-[#52525B]">
+                    ({formatCompactDays(diasTomados)}/{formatCompactDays(diasAsignados)})
                   </span>
                 </div>
 
-                <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-2 py-2 text-center">
-                  <span className="block text-[10px] font-semibold text-[#52525B]">Asignados</span>
-                  <span className="mt-0.5 block text-lg font-bold text-[#18181B]">
-                    {formatCompactDays(diasAsignados)}
+                <button
+                  type="button"
+                  onClick={() => setShowSolicitudModal(true)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#E6004C] px-2.5 py-1 text-[11px] font-bold text-white transition hover:bg-[#FF1764] cursor-pointer"
+                >
+                  <CalendarPlus className="h-3 w-3" />
+                  <span>Solicitar</span>
+                </button>
+              </div>
+            ) : (
+              <div className="p-4">
+                <div className="mb-2.5 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#52525B]">
+                    <CalendarDays className="h-3.5 w-3.5 text-[#E6004C]" />
+                    Vacaciones {saldoVacaciones?.periodo || 2026}
                   </span>
+                  {alertaPasivo ? (
+                    <span className="rounded-full bg-[#E6004C] px-2 py-0.5 text-[10px] font-bold text-white">
+                      &gt; 20 días
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-bold text-[#E6004C]">{progressPct}%</span>
+                  )}
                 </div>
 
-                <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-2 py-2 text-center">
-                  <span className="block text-[10px] font-semibold text-[#52525B]">Tomados</span>
-                  <span className="mt-0.5 block text-lg font-bold text-[#52525B]">
-                    {formatCompactDays(diasTomados)}
-                  </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-[#FFB8D0] bg-[#FFF0F5] px-2 py-2 text-center">
+                    <span className="block text-[10px] font-semibold text-[#52525B]">
+                      Disponibles
+                    </span>
+                    <span className="mt-0.5 block text-lg font-extrabold text-[#E6004C]">
+                      {formatCompactDays(diasDisponibles)}
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-2 py-2 text-center">
+                    <span className="block text-[10px] font-semibold text-[#52525B]">Asignados</span>
+                    <span className="mt-0.5 block text-lg font-bold text-[#18181B]">
+                      {formatCompactDays(diasAsignados)}
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-zinc-200/80 bg-[#F8F9FB] px-2 py-2 text-center">
+                    <span className="block text-[10px] font-semibold text-[#52525B]">Tomados</span>
+                    <span className="mt-0.5 block text-lg font-bold text-[#52525B]">
+                      {formatCompactDays(diasTomados)}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[#FFF0F5]">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#E6004C] to-[#FF1764] shadow-[0_0_10px_rgba(230,0,76,0.35)] transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
+                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[#FFF0F5]">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#E6004C] to-[#FF1764] shadow-[0_0_10px_rgba(230,0,76,0.35)] transition-all duration-500"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
 
-              <button
-                type="button"
-                onClick={() => setShowSolicitudModal(true)}
-                className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#E6004C] px-3 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#FF1764] hover:shadow-[0_0_14px_rgba(230,0,76,0.35)] cursor-pointer"
-              >
-                <CalendarPlus className="h-3.5 w-3.5" />
-                <span>Nueva Solicitud</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSolicitudModal(true)}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#E6004C] px-3 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#FF1764] hover:shadow-[0_0_14px_rgba(230,0,76,0.35)] cursor-pointer"
+                >
+                  <CalendarPlus className="h-3.5 w-3.5" />
+                  <span>Nueva Solicitud</span>
+                </button>
+              </div>
+            )}
           </section>
 
           {/* Tarjeta Diferenciada Copiloto RRHH (solo rol rrhh) */}

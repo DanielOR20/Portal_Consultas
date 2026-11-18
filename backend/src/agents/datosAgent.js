@@ -16,9 +16,16 @@ Tu función es responder la consulta del colaborador autenticado utilizando ÚNI
 
 REGLAS ESTRICTAS:
 1. Usa exclusivamente los números, fechas y estados presentes en el JSON proporcionado. No inventes ni estimes cifras.
-2. Si el contexto no contiene datos de terceros o salarios individuales, explica que solo tienes acceso a los datos del colaborador autenticado (o métricas agregadas si es usuario RRHH).
-3. Cuando el usuario tenga rol "rrhh" y el contexto incluya resumen_agregado_empresa_rrhh, utiliza también los conteos de tickets escalados abiertos, las solicitudes pendientes más antiguas y el último resumen ejecutivo diario si la consulta los requiere.
-4. Responde en español con tono amable, claro, directo y profesional.`;
+2. Si el contexto no contiene datos de terceros o salarios individuales, explica que solo tienes acceso a los datos del colaborador autenticado.
+3. Responde en español con tono amable, claro, directo y profesional.`;
+
+const SYSTEM_PROMPT_RRHH = `Eres el Copiloto Gerencial de Talento Humano (rol RRHH) de NovaCore Technologies Costa Rica S.A.
+Estás autorizado para consultar agregados de empresa y registros detallados de colaboradores provistos en el JSON verificado de MySQL (Sequelize ORM).
+
+REGLAS ESTRICTAS:
+1. Usa ÚNICAMENTE los nombres, puestos, departamentos, correos, fechas, estados, entidades (CCSS/INS) y cifras exactas presentes en el JSON proporcionado. Jamás inventes ni estimes registros.
+2. Cuando te pidan un reporte manual de colaboradores ausentes actuales o de esta semana, prioriza registros vigentes/recientes respecto a "fecha_actual" dentro de "ausencias_aprobadas_actuales_y_recientes_rrhh" (vacaciones, permisos con/sin goce) y "ultimas_incapacidades_rrhh" (CCSS/INS), aclarando por separado si hay solicitudes futuras o teletrabajo aprobado.
+3. Presenta los reportes manuales de forma estructurada, concisa y ejecutiva en español (lista numerada o tabla breve con nombre completo, puesto/departamento, tipo, fechas y estado/entidad), enfocándote únicamente en la cantidad y filtro pedidos sin agregar listados largos no solicitados.`;
 
 function formatDate(date) {
   const y = date.getFullYear();
@@ -192,6 +199,82 @@ async function getAgregadosEmpresa(hoyStr) {
   };
 }
 
+async function getDetallePersonalRrhh(hoyStr) {
+  const colInclude = [
+    {
+      model: Colaborador,
+      as: 'colaborador',
+      attributes: ['nombre', 'puesto', 'departamento', 'email']
+    }
+  ];
+
+  const [solicitudesRecientes, ausenciasAprobadasVigentes, incapacidadesRecientes, mayoresSaldos] =
+    await Promise.all([
+      Solicitud.findAll({
+        order: [['fecha_inicio', 'DESC']],
+        limit: 10,
+        include: colInclude
+      }),
+      Solicitud.findAll({
+        where: {
+          estado: 'aprobada',
+          fecha_inicio: { [Op.lte]: hoyStr }
+        },
+        order: [['fecha_inicio', 'DESC']],
+        limit: 10,
+        include: colInclude
+      }),
+      Incapacidad.findAll({
+        order: [['fecha_inicio', 'DESC']],
+        limit: 10,
+        include: colInclude
+      }),
+      SaldoVacaciones.findAll({
+        order: [['dias_disponibles', 'DESC']],
+        limit: 10,
+        include: colInclude
+      })
+    ]);
+
+  const mapCol = (c) => ({
+    nombre: c?.nombre || 'N/D',
+    puesto: c?.puesto || 'N/D',
+    departamento: c?.departamento || 'N/D',
+    email: c?.email || 'N/D'
+  });
+
+  return {
+    ausencias_aprobadas_actuales_y_recientes_rrhh: ausenciasAprobadasVigentes.map((s) => ({
+      ...mapCol(s.colaborador),
+      tipo: s.tipo,
+      fecha_inicio: s.fecha_inicio,
+      fecha_fin: s.fecha_fin,
+      estado: s.estado
+    })),
+    ultimas_solicitudes_rrhh: solicitudesRecientes.map((s) => ({
+      ...mapCol(s.colaborador),
+      tipo: s.tipo,
+      fecha_inicio: s.fecha_inicio,
+      fecha_fin: s.fecha_fin,
+      estado: s.estado
+    })),
+    ultimas_incapacidades_rrhh: incapacidadesRecientes.map((i) => ({
+      ...mapCol(i.colaborador),
+      tipo: i.tipo,
+      fecha_inicio: i.fecha_inicio,
+      dias: i.dias,
+      entidad: i.entidad
+    })),
+    mayores_saldos_vacaciones_rrhh: mayoresSaldos.map((sv) => ({
+      ...mapCol(sv.colaborador),
+      periodo: sv.periodo,
+      dias_asignados: Number(sv.dias_asignados),
+      dias_tomados: Number(sv.dias_tomados),
+      dias_disponibles: Number(sv.dias_disponibles)
+    }))
+  };
+}
+
 async function runDatosAgent(pregunta, user, historial = []) {
   const hoy = new Date();
   const hoyStr = formatDate(hoy);
@@ -239,9 +322,14 @@ async function runDatosAgent(pregunta, user, historial = []) {
       : null
   };
 
-  // Regla estricta RRHH: solo agregados globales si user.rol === 'rrhh'
+  // Regla estricta RRHH: solo agregados y detalle nominal de personal si user.rol === 'rrhh'
   if (user.rol === 'rrhh') {
-    contextoDatos.resumen_agregado_empresa_rrhh = await getAgregadosEmpresa(hoyStr);
+    const [agregados, detalleRrhh] = await Promise.all([
+      getAgregadosEmpresa(hoyStr),
+      getDetallePersonalRrhh(hoyStr)
+    ]);
+    contextoDatos.resumen_agregado_empresa_rrhh = agregados;
+    Object.assign(contextoDatos, detalleRrhh);
   }
 
   const historialText = Array.isArray(historial) && historial.length > 0
@@ -254,16 +342,17 @@ async function runDatosAgent(pregunta, user, historial = []) {
   const userPrompt = [
     historialText ? `HISTORIAL RECIENTE:\n${historialText}\n` : '',
     `PREGUNTA DEL USUARIO (rol=${user.rol}):\n${pregunta}`,
-    `\nDATOS VERIFICADOS DE MYSQL (JSON):\n${JSON.stringify(contextoDatos, null, 2)}`
+    `\nDATOS VERIFICADOS DE MYSQL (JSON):\n${JSON.stringify(contextoDatos)}`
   ]
     .filter(Boolean)
     .join('\n');
 
   const respuesta = await chatCompletion({
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: user.rol === 'rrhh' ? SYSTEM_PROMPT_RRHH : SYSTEM_PROMPT,
     userPrompt,
     temperature: 0.1,
-    jsonMode: false
+    jsonMode: false,
+    ...(user.rol === 'rrhh' ? { maxTokens: 850 } : {})
   });
 
   return {

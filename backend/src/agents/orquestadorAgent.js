@@ -77,7 +77,7 @@ async function getActiveKeywordsGrouped() {
   return grouped;
 }
 
-function evaluateDeterministicGuardrail(pregunta, grouped) {
+function evaluateDeterministicGuardrail(pregunta, grouped, userRol = 'colaborador') {
   const normQ = normalizeText(pregunta);
 
   const restringidaMatches = grouped.restringida.filter((kw) => containsKeyword(normQ, kw));
@@ -85,8 +85,8 @@ function evaluateDeterministicGuardrail(pregunta, grouped) {
   const politicaMatches = grouped.politica.filter((kw) => containsKeyword(normQ, kw));
   const datoPersonalMatches = grouped.dato_personal.filter((kw) => containsKeyword(normQ, kw));
 
-  // Si coincide con términos restringidos de MySQL y no coexiste un contexto claro de política/dato propio sin terceros
-  if (restringidaMatches.length > 0) {
+  // Bloqueo estricto de privacidad de terceros únicamente para colaboradores estándar (nunca para rol 'rrhh')
+  if (userRol !== 'rrhh' && restringidaMatches.length > 0) {
     const hasMultipleRestricted = restringidaMatches.length >= 2;
     const hasRelationalPhrase = restringidaMatches.some((kw) => kw.includes(' '));
     const hasOwnOrPolicyContext = politicaMatches.length > 0 || datoPersonalMatches.length > 0;
@@ -99,7 +99,8 @@ function evaluateDeterministicGuardrail(pregunta, grouped) {
   if (
     fueraAlcanceMatches.length > 0 &&
     politicaMatches.length === 0 &&
-    datoPersonalMatches.length === 0
+    datoPersonalMatches.length === 0 &&
+    (userRol !== 'rrhh' || restringidaMatches.length === 0)
   ) {
     return 'fuera_alcance';
   }
@@ -108,8 +109,18 @@ function evaluateDeterministicGuardrail(pregunta, grouped) {
 }
 
 function buildClassifierPrompt(userRol, grouped) {
+  const rrhhRules =
+    userRol === 'rrhh'
+      ? `CONTEXTO PRIVILEGIADO DE ROL ("rrhh" - Dirección de Talento Humano):
+- Este usuario ESTÁ AUTORIZADO para consultar nombres, departamentos, ausencias, vacaciones, incapacidades, saldos, solicitudes pendientes, tickets abiertos y generar reportes manuales nominales de cualquier colaborador de la empresa.
+- Para rol "rrhh", NO clasifiques consultas operativas de personal (ausentes, vacaciones de compañeros, incapacidades, saldos por colaborador, reportes manuales) como "restringida"; clasifícalas como "dato_personal" (o "mixta" si además pregunta una regla de política).`
+      : `REGLA ESTRICTA DE PRIVACIDAD PARA ROL ("colaborador"):
+- Este usuario NO puede acceder a datos individuales, saldos, incapacidades, ausencias ni salarios de otros colaboradores o directivos, ni conteos globales internos; esas consultas DEBEN clasificarse como "restringida".`;
+
   return `Eres el Agente Orquestador del Portal Interno de Talento Humano de NovaCore Technologies Costa Rica S.A.
 El usuario autenticado actual tiene el rol: "${userRol}".
+
+${rrhhRules}
 
 Referencias dinámicas cargadas desde la base de datos (palabras_clave):
 - Términos de política: ${grouped.politica.join(', ')}
@@ -120,10 +131,10 @@ Referencias dinámicas cargadas desde la base de datos (palabras_clave):
 Clasifica la consulta del usuario en EXACTAMENTE UNA de estas 5 categorías y responde únicamente con un JSON válido:
 
 1. "politica": Preguntas sobre reglas generales, políticas internas de NovaCore o legislación laboral de Costa Rica. Incluye preguntas sobre si la empresa ofrece algún bono, subsidio o beneficio específico (aunque no exista en el catálogo), así como consultas generales en primera persona sobre reglas normativas (ej. "¿qué incluye mi liquidación si me despiden?", "me incapacitaron 5 días, ¿quién paga?", "¿cuánto me descuentan de planilla por CCSS?", "¿cuáles son mis derechos ARCO?").
-2. "dato_personal": Preguntas sobre los registros propios actuales del usuario autenticado en MySQL (su saldo actual de vacaciones, estado de sus solicitudes, incapacidades registradas, fecha de su próximo pago, fecha de su próxima evaluación, puesto o fecha de ingreso). Si el usuario tiene rol "rrhh", también incluye métricas o conteos agregados generales de la empresa.
-3. "mixta": Preguntas que combinan explícitamente consultar un dato personal de MySQL del usuario (ej. su saldo actual, su próximo pago, sus incapacidades registradas) Y una regla de política normativa.
-4. "restringida": Preguntas que piden datos personales, salariales, evaluaciones, incapacidades o saldos de OTRO colaborador o directivo específico, o conteos globales de otros empleados cuando el usuario NO tiene rol "rrhh".
-5. "fuera_alcance": Temas completamente ajenos a Recursos Humanos, beneficios laborales o NovaCore (ej. películas, clima, recetas, chistes, programación).
+2. "dato_personal": Preguntas sobre los registros propios actuales del usuario autenticado en MySQL (saldo de vacaciones, solicitudes, incapacidades, próximo pago, evaluación, puesto o fecha de ingreso). Si user.rol === "rrhh", también incluye TODAS las consultas administrativas, listados nominales del personal, ausencias recientes, incapacidades, saldos de colaboradores, solicitudes pendientes, tickets abiertos y generación de reportes manuales de personal.
+3. "mixta": Preguntas que combinan consultar datos de MySQL (propios o operativos de personal si rol === "rrhh") Y una regla de política normativa.
+4. "restringida": ÚNICAMENTE cuando rol === "colaborador": preguntas que piden datos personales, salariales, evaluaciones, incapacidades o saldos de OTRO colaborador o directivo específico, o conteos globales de otros empleados.
+5. "fuera_alcance": Temas completamente ajenos a Recursos Humanos, gestión de personal, beneficios laborales o NovaCore (ej. películas, clima, recetas, chistes, programación).
 
 Responde exclusivamente en formato JSON:
 {
@@ -140,7 +151,7 @@ Debes combinar en una sola respuesta clara, estructurada y amable en español:
 No inventes datos adicionales ni alteres cifras.`;
 
 async function classifyIntent(pregunta, userRol, grouped, historial = []) {
-  const guardrailIntent = evaluateDeterministicGuardrail(pregunta, grouped);
+  const guardrailIntent = evaluateDeterministicGuardrail(pregunta, grouped, userRol);
   if (guardrailIntent) {
     return { intencion: guardrailIntent, via: 'db_guardrail' };
   }
